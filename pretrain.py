@@ -251,6 +251,14 @@ def load_checkpoint(config: PretrainConfig, train_state: TrainState):
     )
     set_optimizer_state_dict(train_state.model, train_state.optim, optim_state)
 
+    # set_optimizer_state_dict silently overwrites param_groups with the pretrain hyperparams
+    # (lr, betas, weight_decay, ema). Restore the SFT cfg values so that overrides take effect.
+    # (lr is also restored every step by update_lr() — these three are not.)
+    for param_group in train_state.optim.param_groups:
+        param_group["betas"] = (config.beta1, config.beta2)
+        param_group["weight_decay"] = config.weight_decay
+        param_group["ema"] = config.ema
+
     if config.weights_only_resume_from_ema:
         print("[Resume] Swapping EMA into model and resetting optimizer state")
         train_state.optim.swap_ema()

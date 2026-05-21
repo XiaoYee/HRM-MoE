@@ -14,11 +14,11 @@ hydra:
 resume_from: ???
 weights_only_resume_from_ema: false   # Set true to swap EMA into model and reset optim
 
-global_batch_size: 4096
-epochs: 10
-checkpoint_interval: 5
+global_batch_size: 32768
+epochs: 5
+checkpoint_interval: 1
 
-lr: 2.0e-5
+lr: 3.0e-5
 lr_min_ratio: 0.1
 lr_warmup_steps: 0
 
@@ -29,4 +29,7 @@ weight_decay: 0.1
 beta1: 0.9
 beta2: 0.95
 
-ema: 0.9999
+# EMA decay tuned for short SFT runs. At ~1300 steps the EMA buffer ends up
+# tracking mostly SFT trajectory, and using --use-ema at eval gives a small
+# regularization boost over raw weights.
+ema: 0.999
