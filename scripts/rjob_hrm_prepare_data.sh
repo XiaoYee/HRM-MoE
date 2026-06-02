@@ -9,6 +9,7 @@ job_name="${job_name:-hrm-data-${stage}}"
 auto_restart="${auto_restart:-false}"
 WANDB_MODE="${WANDB_MODE:-disabled}"
 tokenizer_impl="${tokenizer_impl:-${TOKENIZER_IMPL:-auto}}"
+bootstrap="${bootstrap:-${HRM_BOOTSTRAP:-0}}"
 
 case "${stage}" in
   check)
@@ -62,7 +63,7 @@ case "${stage}" in
     ;;
 esac
 
-export mode job_name num_gpus memory cpu auto_restart rdma host_network gang_start share_host_shm WANDB_MODE
+export mode job_name num_gpus memory cpu auto_restart rdma host_network gang_start share_host_shm WANDB_MODE bootstrap
 export DATA_PREP_STAGE="${stage}"
 export DATA_IO_DIR="${DATA_IO_DIR:-/mnt/shared-storage-user/quxiaoye/data_io}"
 hrm_repo_dir="${repo_dir:-${HRM_REPO_DIR:-/mnt/shared-storage-user/quxiaoye/HRM-Text}}"

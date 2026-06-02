@@ -144,6 +144,7 @@ sample_tokenized() {
     echo "Missing tokenized data at ${tokenized_path}. Run stage=tokenize first." >&2
     exit 5
   fi
+  mkdir -p "$(dirname "${analytics_path}")"
   python sample_tokenized.py \
     "tokenized_path=${tokenized_path}" \
     "output_path=${sampled_output}" \

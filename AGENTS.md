@@ -13,6 +13,20 @@ Use these files as the primary source of truth:
 - `config/cfg_sft.yaml` for full-parameter SFT settings
 - `pretrain.py` for the actual Hydra and FSDP2 training entrypoint
 
+## Version Control
+
+All agent code changes in this repository must be managed with git:
+
+- Work on a named branch instead of leaving substantial changes only in the
+  worktree.
+- Run `git status --short --branch` before and after edits.
+- Stage only intentional code, script, and documentation changes; never stage
+  data, checkpoints, W&B outputs, or rjob logs.
+- Commit completed changes with a concise message after validation. If a change
+  is intentionally left uncommitted, record why in the user update.
+- Do not edit entrypoint scripts while an rjob is still reading them from shared
+  storage. Prefer committing fixes, then launching a fresh rjob from that commit.
+
 ## Environment Model
 
 Do not treat the local `.venv` as the training environment. HRM training depends
@@ -63,13 +77,17 @@ Use the HRM rjob wrappers under `scripts/`:
   and `vllm`
 - `scripts/tokenize_data_io_python.py` is a no-Cargo fallback that writes the
   same tokenized layout as `data_io/tokenizer`
+- `scripts/compare_tokenized_outputs.py` compares Rust and Python tokenized
+  outputs for small-sample parity before trusting the Python fallback
 - Set `tokenizer_workers=<N>` on `stage=tokenize` when using the Python
   fallback; the container may report a low `os.cpu_count()` despite a larger
   rjob CPU request.
 - Prefer the official Rust `data_io/tokenizer` for full data prep. A shared
   Rust toolchain is installed at `/mnt/shared-storage-user/quxiaoye/.hrm-rust`,
   and the wrapper passes `CARGO_HOME`, `RUSTUP_HOME`, and mirror URLs into
-  rjob. Use `tokenizer_impl=rust bootstrap=0 cpu=5` for tokenization so the
+  rjob. `tokenizer_impl=auto` uses Rust only when `cargo` is already present;
+  it falls back to Python instead of auto-installing Rust. Use
+  `tokenizer_impl=rust bootstrap=0 cpu=5` for tokenization so the
   Rust tokenizer sees only four worker threads; the official tokenizer holds a
   file's tokenized output in memory before writing, so exposing dozens of CPUs
   can over-parallelize large parquet files.
@@ -89,6 +107,7 @@ stage=download_cleaned bash scripts/rjob_hrm_prepare_data.sh
 stage=tokenize bash scripts/rjob_hrm_prepare_data.sh
 stage=tokenize tokenizer_impl=rust bootstrap=0 cpu=5 bash scripts/rjob_hrm_prepare_data.sh
 stage=sample epochs=4 bash scripts/rjob_hrm_prepare_data.sh
+python scripts/compare_tokenized_outputs.py /path/to/rust_tokenized /path/to/python_tokenized
 num_gpus=8 arch_size=L global_batch_size=172032 extra_args='lr=2.5e-4' bash scripts/rjob_hrm_pretrain.sh
 num_gpus=16 arch_size=XL bash scripts/rjob_hrm_pretrain.sh
 resume_from=/path/to/pretrain data_path=/path/to/sft_data checkpoint_path=/path/to/out bash scripts/rjob_hrm_sft.sh
@@ -104,6 +123,8 @@ Default rjob settings are intentionally close to the reference project:
   validates imports
 - host network, gang start, RDMA resources
 - mounts for `quxiaoye`, `moegroup`, `moegroup2`, and `intern7shared`
+- data-prep wrapper defaults `bootstrap=0` because it installs `data_io`
+  requirements itself and does not need the training runtime overlay
 
 Preserve these hardcoded cluster paths unless the task is specifically about
 changing cluster environment setup.
@@ -209,6 +230,10 @@ python scripts/prepare_sft_data.py \
 - Tokenization and sampling are different stages. The expensive one-time
   tokenizer output is `data_tokenized_bpe_65k`; `sample_tokenized.py` only
   builds `tokens.npy`, `metadata.json`, and `epoch_*` arrays for training.
+- The Python tokenizer fallback must be treated as an emergency path until it
+  passes a small-sample parity check against the Rust tokenizer with
+  `scripts/compare_tokenized_outputs.py`. The persistent data used here was
+  produced by the official Rust tokenizer, not the fallback.
 - The official Rust tokenizer should run with `tokenizer_impl=rust bootstrap=0
   cpu=5`; exposing many CPUs can over-parallelize parquet files and blow up
   memory because the tokenizer holds each tokenized file before writing.
@@ -235,8 +260,9 @@ python scripts/prepare_sft_data.py \
   `_flash_attn_backward` wrapper that uses the older keyword `causal` instead
   of `is_causal` and requires `softmax_scale`; the observed signature also
   accepts `window_size`, `softcap`, `deterministic`, and `sm_margin`. Keep
-  `models/flash_attention_prefixlm_v2.py` compatible with both APIs; otherwise
-  the first backward pass fails after data loading.
+  `models/flash_attention_prefixlm_v2.py` compatible with both APIs and pass an
+  explicit `q.shape[-1] ** -0.5` scale through forward and backward so the two
+  API paths cannot diverge silently.
 - CPU rjobs cannot rely on host networking here. Downloads that need host
   network should either run locally on the login node or request an 8-GPU rjob
   with `host_network=true`; sampling/tokenization should not need host network.

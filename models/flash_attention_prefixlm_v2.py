@@ -10,12 +10,16 @@ from flash_attn_interface import _flash_attn_backward, maybe_contiguous
 _flash_attn_backward_causal_kw: Optional[str] = None
 
 
+def _default_softmax_scale(q: Tensor) -> float:
+    return q.shape[-1] ** -0.5
+
+
 def _flash_attn_backward_with_causal_kw(*, is_causal: bool, **kwargs):
     old_kwargs = dict(kwargs)
     old_kwargs.setdefault("sequed_k", None)
+    old_kwargs.setdefault("softmax_scale", _default_softmax_scale(old_kwargs["q"]))
     return _flash_attn_backward(
         **old_kwargs,
-        softmax_scale=None,
         causal=is_causal,
         window_size=(-1, -1),
         softcap=0.0,
@@ -81,6 +85,7 @@ def _custom_flash_attn_forward(
 
     cu_seqlens_q, cu_seqlens_k = [maybe_contiguous(x) for x in (cu_seqlens_q, cu_seqlens_k)]
     seqused_q, seqused_k = [maybe_contiguous(x) for x in (seqused_q, seqused_k)]
+    softmax_scale = _default_softmax_scale(q)
 
     # Call cuda fwd using kwargs for ALL arguments
     out, softmax_lse, *rest = torch.ops.flash_attn_3.fwd(
@@ -107,7 +112,7 @@ def _custom_flash_attn_forward(
         q_descale=None,
         k_descale=None,
         v_descale=None,
-        softmax_scale=None,
+        softmax_scale=softmax_scale,
         is_causal=causal,
         window_size_left=-1,
         window_size_right=-1,
@@ -219,6 +224,7 @@ def flash_attn_varlen_prefixlm_bwd_compileop(
     dq = torch.empty_like(q)
     dk1, dv1 = torch.zeros_like(k), torch.zeros_like(v)  # Zero-fill in advance
     dk2, dv2 = torch.empty_like(k), torch.empty_like(v)
+    softmax_scale = _default_softmax_scale(q)
     # Bwd pass 1 (bidirectional)
     _flash_attn_backward_compat(
         dout=dout, q=q, k=k, v=v, out=out,
@@ -229,6 +235,7 @@ def flash_attn_varlen_prefixlm_bwd_compileop(
         dq=dq,
         dk=dk1,
         dv=dv1,
+        softmax_scale=softmax_scale,
         is_causal=is_causal)
     # Bwd pass 2 (causal)
     _flash_attn_backward_compat(
@@ -240,6 +247,7 @@ def flash_attn_varlen_prefixlm_bwd_compileop(
         dq=dq,
         dk=dk2,
         dv=dv2,
+        softmax_scale=softmax_scale,
         is_causal=True)
 
     # Zero padding grads
