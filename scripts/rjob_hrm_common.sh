@@ -19,6 +19,7 @@ host_network="${host_network:-true}"
 gang_start="${gang_start:-true}"
 share_host_shm="${share_host_shm:-true}"
 bootstrap="${bootstrap:-1}"
+entrypoint="${entrypoint:-scripts/hrm_entrypoint.sh}"
 
 if (( num_gpus == 0 )) && [[ "${mode}" != "env_check" && "${mode}" != "prepare_data" ]]; then
   echo "num_gpus=0 is only supported for env_check and prepare_data." >&2
@@ -28,11 +29,18 @@ fi
 if (( num_gpus == 0 )); then
   num_nodes=1
   gpu_per_replica=0
+elif [[ "${mode}" == "eval" ]]; then
+  if (( num_gpus < 1 || num_gpus > 8 )); then
+    echo "eval mode supports num_gpus from 1 to 8 on one node." >&2
+    exit 2
+  fi
+  num_nodes=1
+  gpu_per_replica="${num_gpus}"
 elif (( num_gpus % 8 == 0 )); then
   num_nodes=$((num_gpus / 8))
   gpu_per_replica=8
 else
-  echo "num_gpus must be 0 or a multiple of 8 for this rjob launcher." >&2
+  echo "num_gpus must be 0, 1-8 for eval, or a multiple of 8 for this rjob launcher." >&2
   exit 2
 fi
 
@@ -70,6 +78,14 @@ rjob_env=(
   -e "HF_ENDPOINT=${HF_ENDPOINT:-https://huggingface.co}"
   -e "HF_HUB_ETAG_TIMEOUT=${HF_HUB_ETAG_TIMEOUT:-60}"
   -e "HF_HUB_DOWNLOAD_TIMEOUT=${HF_HUB_DOWNLOAD_TIMEOUT:-120}"
+  -e "HRM_EVAL_CKPT_PATH=${ckpt_path:-}"
+  -e "HRM_EVAL_CKPT_EPOCH=${ckpt_epoch:-}"
+  -e "HRM_EVAL_CKPT_USE_EMA=${ckpt_use_ema:-}"
+  -e "HRM_EVAL_CONFIG=${eval_config:-}"
+  -e "HRM_EVAL_RUN_ONLY=${run_only:-}"
+  -e "HRM_EVAL_BATCH_SIZE=${batch_size:-}"
+  -e "HRM_EVAL_EXTRA_ARGS=${eval_extra_args:-}"
+  -e "HRM_EVAL_WORKDIR=${eval_workdir:-}"
   -e "WANDB_MODE=${WANDB_MODE:-online}"
 )
 
@@ -121,4 +137,4 @@ rjob submit \
   "${rjob_resource_args[@]}" \
   --auto-restart="${auto_restart}" \
   "${rjob_env[@]}" \
-  -- bash -lc "cd ${repo_dir} && bash scripts/hrm_entrypoint.sh"
+  -- bash -lc "cd ${repo_dir} && bash ${entrypoint}"

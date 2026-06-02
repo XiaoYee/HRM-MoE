@@ -66,9 +66,11 @@ Use the HRM rjob wrappers under `scripts/`:
   either CPU-only (`num_gpus=0`) or one 8-GPU node (`num_gpus=8`)
 - `scripts/rjob_hrm_pretrain.sh` launches `pretrain.py` with pretraining config
 - `scripts/rjob_hrm_sft.sh` launches `pretrain.py --config-name cfg_sft`
+- `scripts/rjob_hrm_eval.sh` launches `python -m evaluation.main` on one GPU
 - `scripts/rjob_hrm_prepare_data.sh` runs HRM pretraining data preparation
 - `scripts/rjob_hrm_common.sh` owns rjob resources, image, mounts, and RDMA flags
 - `scripts/hrm_entrypoint.sh` owns container-side env vars and `torchrun`
+- `scripts/hrm_eval_entrypoint.sh` owns container-side evaluation setup
 - `scripts/hrm_prepare_data_entrypoint.sh` owns `data_io` download, tokenization,
   and stratified sampling
 - `scripts/build_hrm_image.sh` builds and optionally pushes an internal HRM image
@@ -111,6 +113,8 @@ python scripts/compare_tokenized_outputs.py /path/to/rust_tokenized /path/to/pyt
 num_gpus=8 arch_size=L global_batch_size=172032 extra_args='lr=2.5e-4' bash scripts/rjob_hrm_pretrain.sh
 num_gpus=16 arch_size=XL bash scripts/rjob_hrm_pretrain.sh
 resume_from=/path/to/pretrain data_path=/path/to/sft_data checkpoint_path=/path/to/out bash scripts/rjob_hrm_sft.sh
+ckpt_path=/path/to/checkpoints/run_dir run_only='[GSM8k,MATH]' bash scripts/rjob_hrm_eval.sh
+ckpt_path=/path/to/checkpoints/run_dir ckpt_epoch=1 batch_size=16 bash scripts/rjob_hrm_eval.sh
 ```
 
 Default rjob settings are intentionally close to the reference project:
@@ -121,6 +125,8 @@ Default rjob settings are intentionally close to the reference project:
 - one replica per 8 GPUs for training
 - env-check wrapper lowers CPU/memory and disables RDMA because it only
   validates imports
+- eval wrapper defaults to one GPU, no RDMA, no gang start, and a separate
+  entrypoint so it does not touch a running training entrypoint
 - host network, gang start, RDMA resources
 - mounts for `quxiaoye`, `moegroup`, `moegroup2`, and `intern7shared`
 - data-prep wrapper defaults `bootstrap=0` because it installs `data_io`
@@ -222,6 +228,11 @@ python scripts/prepare_sft_data.py \
 - Pass Hydra overrides directly through `extra_args` or the wrapper-specific
   env vars instead of editing default configs for one-off experiments.
 - For SFT, require `resume_from`, `data_path`, and `checkpoint_path`.
+- For evaluation, require `ckpt_path`; pass benchmark subsets with
+  `run_only='[GSM8k,MATH]'` and lower memory use with `batch_size=16`.
+  The HRM evaluation entrypoint defaults `eval_workdir` to
+  `/mnt/shared-storage-user/quxiaoye/data_io/tokenizer` because current
+  checkpoints store the BPE tokenizer path as `../trained_tokenizers/...`.
 - W&B is used by `pretrain.py`; make sure credentials are available in the job
   environment before long runs.
 

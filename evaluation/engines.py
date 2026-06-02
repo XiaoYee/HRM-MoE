@@ -1,6 +1,5 @@
 from typing import Optional
 from tqdm import tqdm
-from vllm import LLM, SamplingParams
 
 from simple_inference_engine import inference_load_checkpoint, inference_generate
 
@@ -10,9 +9,13 @@ class BaseEngine:
 
 class VLLMEngine(BaseEngine):
     def __init__(self, ckpt_path: str, **kwargs):
+        from vllm import LLM
+
         self.llm = LLM(model=ckpt_path, **kwargs)
 
     def generate(self, prompts: list[str], temperature: float = 0.0, max_tokens: Optional[int] = None, stop: Optional[str | list[str]] = None) -> list[str]:
+        from vllm import SamplingParams
+
         outputs = self.llm.generate(prompts, SamplingParams(
             temperature=temperature,
             max_tokens=max_tokens,
