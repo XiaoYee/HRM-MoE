@@ -333,6 +333,13 @@ python scripts/prepare_sft_data.py \
   rjob when the watcher eventually submits.
 - Always `dry_run=true` a new rjob eval launch shape before leaving a watcher to
   submit it automatically.
+- Local watchdogs that run under `set -u` should use `bash -c`, not `bash -lc`.
+  On the login node, the login-shell profile has referenced `ZSH_VERSION`
+  without a default and can make a watcher exit before it writes its own log.
+- Keep auto-submitted eval job names short, e.g. `hrm-eval-e1-0602`. The rjob
+  client combines the job name with `generated-task-0` for a Kubernetes label,
+  so descriptive checkpoint-derived names can exceed the 63-character label
+  limit even before the job is submitted.
 
 ## Local Validation
 
