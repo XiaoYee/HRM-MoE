@@ -34,5 +34,5 @@ export RJOB_HTTPS_PROXY="${rjob_https_proxy:-${RJOB_HTTPS_PROXY:-${https_proxy:-
 export RJOB_NO_PROXY="${rjob_no_proxy:-${RJOB_NO_PROXY:-${cluster_no_proxy_default}}}"
 
 export mode num_gpus job_name memory cpu auto_restart rdma host_network gang_start share_host_shm WANDB_MODE bootstrap entrypoint
-export ckpt_path ckpt_epoch ckpt_use_ema eval_config run_only batch_size eval_extra_args eval_workdir
+export ckpt_path ckpt_epoch ckpt_use_ema eval_config run_only batch_size eval_extra_args eval_workdir eval_max_parallel
 exec bash "${script_dir}/rjob_hrm_common.sh"
