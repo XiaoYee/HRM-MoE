@@ -1,0 +1,17 @@
+coolname
+datasets
+einops
+hydra-core
+lm-eval[hf]
+math-verify
+numba
+numpy
+omegaconf
+pydantic
+PyYAML
+safetensors
+sympy
+tqdm
+transformers
+tokenizers
+wandb

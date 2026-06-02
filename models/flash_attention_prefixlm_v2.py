@@ -7,6 +7,43 @@ import numpy as np
 from flash_attn_interface import _flash_attn_backward, maybe_contiguous
 
 
+_flash_attn_backward_causal_kw: Optional[str] = None
+
+
+def _flash_attn_backward_with_causal_kw(*, is_causal: bool, **kwargs):
+    old_kwargs = dict(kwargs)
+    old_kwargs.setdefault("sequed_k", None)
+    return _flash_attn_backward(
+        **old_kwargs,
+        softmax_scale=None,
+        causal=is_causal,
+        window_size=(-1, -1),
+        softcap=0.0,
+        deterministic=False,
+        sm_margin=0,
+    )
+
+
+def _flash_attn_backward_compat(*, is_causal: bool, **kwargs):
+    global _flash_attn_backward_causal_kw
+
+    if _flash_attn_backward_causal_kw == "is_causal":
+        return _flash_attn_backward(**kwargs, is_causal=is_causal)
+    if _flash_attn_backward_causal_kw == "causal":
+        return _flash_attn_backward_with_causal_kw(**kwargs, is_causal=is_causal)
+
+    try:
+        result = _flash_attn_backward(**kwargs, is_causal=is_causal)
+    except TypeError as exc:
+        if "is_causal" not in str(exc):
+            raise
+        _flash_attn_backward_causal_kw = "causal"
+        return _flash_attn_backward_with_causal_kw(**kwargs, is_causal=is_causal)
+    else:
+        _flash_attn_backward_causal_kw = "is_causal"
+        return result
+
+
 def compute_aux_seq_tensors_scalars(prefix_lens: np.ndarray, causal_lens: np.ndarray, batch_max_tokens: int):
     # Tensors
     total_lens = prefix_lens + causal_lens
@@ -183,7 +220,7 @@ def flash_attn_varlen_prefixlm_bwd_compileop(
     dk1, dv1 = torch.zeros_like(k), torch.zeros_like(v)  # Zero-fill in advance
     dk2, dv2 = torch.empty_like(k), torch.empty_like(v)
     # Bwd pass 1 (bidirectional)
-    _flash_attn_backward(
+    _flash_attn_backward_compat(
         dout=dout, q=q, k=k, v=v, out=out,
         softmax_lse=softmax_lse_bidir,
         cu_seqlens_q=cu_seqlens, cu_seqlens_k=cu_seqlens,
@@ -194,7 +231,7 @@ def flash_attn_varlen_prefixlm_bwd_compileop(
         dv=dv1,
         is_causal=is_causal)
     # Bwd pass 2 (causal)
-    _flash_attn_backward(
+    _flash_attn_backward_compat(
         dout=dout, q=q, k=k, v=v, out=out,
         softmax_lse=softmax_lse_causal,
         cu_seqlens_q=cu_seqlens_shifted, cu_seqlens_k=cu_seqlens,
