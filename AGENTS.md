@@ -24,6 +24,10 @@ All agent code changes in this repository must be managed with git:
   data, checkpoints, W&B outputs, or rjob logs.
 - Commit completed changes with a concise message after validation. If a change
   is intentionally left uncommitted, record why in the user update.
+- After completing cluster, training, data-prep, or evaluation work, update this
+  AGENTS.md with durable lessons learned, reusable commands, and new pitfalls
+  before committing. Treat this as part of the done criteria, not optional
+  cleanup.
 - Do not edit entrypoint scripts while an rjob is still reading them from shared
   storage. Prefer committing fixes, then launching a fresh rjob from that commit.
 
@@ -66,11 +70,18 @@ Use the HRM rjob wrappers under `scripts/`:
   either CPU-only (`num_gpus=0`) or one 8-GPU node (`num_gpus=8`)
 - `scripts/rjob_hrm_pretrain.sh` launches `pretrain.py` with pretraining config
 - `scripts/rjob_hrm_sft.sh` launches `pretrain.py --config-name cfg_sft`
-- `scripts/rjob_hrm_eval.sh` launches `python -m evaluation.main` on one GPU
+- `scripts/rjob_hrm_eval.sh` launches evaluation; with the default entrypoint it
+  runs `python -m evaluation.main` on one GPU, and with
+  `entrypoint=scripts/hrm_eval_fanout_entrypoint.sh num_gpus=8` it runs sharded
+  8-card evaluation
+- `scripts/rjob_hrm_eval_after_epoch.sh` watches a checkpoint directory until a
+  target epoch is complete and stable, then submits an eval rjob
 - `scripts/rjob_hrm_prepare_data.sh` runs HRM pretraining data preparation
 - `scripts/rjob_hrm_common.sh` owns rjob resources, image, mounts, and RDMA flags
 - `scripts/hrm_entrypoint.sh` owns container-side env vars and `torchrun`
 - `scripts/hrm_eval_entrypoint.sh` owns container-side evaluation setup
+- `scripts/hrm_eval_fanout_entrypoint.sh` shards each selected benchmark's
+  prompts across available GPUs and aggregates metrics after generation
 - `scripts/hrm_prepare_data_entrypoint.sh` owns `data_io` download, tokenization,
   and stratified sampling
 - `scripts/build_hrm_image.sh` builds and optionally pushes an internal HRM image
@@ -115,6 +126,8 @@ num_gpus=16 arch_size=XL bash scripts/rjob_hrm_pretrain.sh
 resume_from=/path/to/pretrain data_path=/path/to/sft_data checkpoint_path=/path/to/out bash scripts/rjob_hrm_sft.sh
 ckpt_path=/path/to/checkpoints/run_dir run_only='[GSM8k,MATH]' bash scripts/rjob_hrm_eval.sh
 ckpt_path=/path/to/checkpoints/run_dir ckpt_epoch=1 batch_size=16 bash scripts/rjob_hrm_eval.sh
+ckpt_path=/path/to/checkpoints/run_dir ckpt_epoch=1 num_gpus=8 batch_size=16 entrypoint=scripts/hrm_eval_fanout_entrypoint.sh bash scripts/rjob_hrm_eval.sh
+ckpt_path=/path/to/checkpoints/run_dir ckpt_epoch=1 num_gpus=8 batch_size=16 bash scripts/rjob_hrm_eval_after_epoch.sh
 ```
 
 Default rjob settings are intentionally close to the reference project:
@@ -127,6 +140,9 @@ Default rjob settings are intentionally close to the reference project:
   validates imports
 - eval wrapper defaults to one GPU, no RDMA, no gang start, and a separate
   entrypoint so it does not touch a running training entrypoint
+- 8-card eval uses one eval replica with eight GPUs; the fanout entrypoint keeps
+  all selected GPUs busy by splitting each benchmark's prompt list across GPUs
+  instead of assigning one benchmark per GPU
 - host network, gang start, RDMA resources
 - mounts for `quxiaoye`, `moegroup`, `moegroup2`, and `intern7shared`
 - data-prep wrapper defaults `bootstrap=0` because it installs `data_io`
@@ -233,6 +249,15 @@ python scripts/prepare_sft_data.py \
   The HRM evaluation entrypoint defaults `eval_workdir` to
   `/mnt/shared-storage-user/quxiaoye/data_io/tokenizer` because current
   checkpoints store the BPE tokenizer path as `../trained_tokenizers/...`.
+- For all-benchmark 8-card evaluation, prefer
+  `entrypoint=scripts/hrm_eval_fanout_entrypoint.sh num_gpus=8`; it data-shards
+  every benchmark across GPUs and avoids the low-utilization pattern of one GPU
+  per benchmark.
+- When waiting for a training epoch before evaluation, use
+  `scripts/rjob_hrm_eval_after_epoch.sh` or equivalent logic. Checkpoint
+  readiness means `fsdp2_epoch_<N>/.metadata` exists, all expected
+  `carry_epoch_<N>.<rank>.pt` files exist, and file sizes/mtimes have stayed
+  stable across repeated checks.
 - W&B is used by `pretrain.py`; make sure credentials are available in the job
   environment before long runs.
 
@@ -294,6 +319,20 @@ python scripts/prepare_sft_data.py \
   epoch directories. Token writing took about 47 minutes, epoch index generation
   about 43 seconds, and report generation about 6 seconds on the observed CPU
   rjob.
+- `num_gpus=8` only allocates eight GPUs for an eval rjob; it does not make a
+  single `evaluation.main` process use all eight. Avoid the naive strategy of
+  one benchmark per GPU for full eval because benchmark sizes vary and the job
+  leaves GPUs idle after short benchmarks finish. Use prompt-level sharding
+  within each benchmark and aggregate generations before computing metrics.
+- Epoch-gated eval watchers should write idempotency markers under `rjob_logs/`
+  rather than under checkpoint directories. Checkpoint directories are often
+  root-owned because training rjobs create them.
+- For long-lived local watchers, run them in tmux and tee logs into
+  `rjob_logs/`. If you change watcher submission logic, restart the watcher;
+  if you only change the future eval entrypoint path it will be picked up by the
+  rjob when the watcher eventually submits.
+- Always `dry_run=true` a new rjob eval launch shape before leaving a watcher to
+  submit it automatically.
 
 ## Local Validation
 

@@ -58,131 +58,37 @@ if [[ ! -d "${eval_workdir}" ]]; then
   eval_workdir="${repo_dir}"
 fi
 
-mapfile -t benchmarks < <(python - "${eval_config}" "${run_only}" <<'PY'
-import sys
-import yaml
-
-config_path, run_only = sys.argv[1], sys.argv[2].strip()
-with open(config_path, "r") as f:
-    cfg = yaml.safe_load(f)
-
-names = [item["name"] for item in cfg["benchmarks"]]
-if run_only:
-    if run_only.startswith("[") and run_only.endswith("]"):
-        requested = [x.strip().strip("'\"") for x in run_only[1:-1].split(",") if x.strip()]
-    else:
-        requested = [run_only]
-    requested_set = set(requested)
-    unknown = [name for name in requested if name not in names]
-    if unknown:
-        raise ValueError(f"Unknown benchmark(s) in run_only: {unknown}")
-    names = [name for name in names if name in requested_set]
-
-for name in names:
-    print(name)
-PY
+eval_args=(
+  "config=${eval_config}"
+  "ckpt_path=${ckpt_path}"
+  "fanout.output_dir=${bench_log_dir}"
 )
 
-if (( ${#benchmarks[@]} == 0 )); then
-  echo "No benchmarks selected." >&2
-  exit 2
+if [[ -n "${ckpt_epoch}" ]]; then
+  eval_args+=("ckpt_epoch=${ckpt_epoch}")
 fi
 
-gpu_count="$(python - <<'PY'
-import torch
-print(torch.cuda.device_count())
-PY
-)"
-
-if ! [[ "${gpu_count}" =~ ^[0-9]+$ ]] || (( gpu_count < 1 )); then
-  echo "No CUDA devices available for evaluation." >&2
-  exit 1
+if [[ -n "${ckpt_use_ema}" ]]; then
+  eval_args+=("ckpt_use_ema=${ckpt_use_ema}")
 fi
 
-if [[ -z "${max_parallel}" ]]; then
-  max_parallel="${gpu_count}"
+if [[ -n "${run_only}" ]]; then
+  eval_args+=("run_only=${run_only}")
 fi
 
-if ! [[ "${max_parallel}" =~ ^[0-9]+$ ]] || (( max_parallel < 1 )); then
-  echo "eval_max_parallel/HRM_EVAL_MAX_PARALLEL must be a positive integer." >&2
-  exit 2
+if [[ -n "${batch_size}" ]]; then
+  eval_args+=("generation_config.batch_size=${batch_size}")
 fi
 
-if (( max_parallel > gpu_count )); then
-  max_parallel="${gpu_count}"
+if [[ -n "${max_parallel}" ]]; then
+  eval_args+=("fanout.num_workers=${max_parallel}")
 fi
 
-echo "Selected benchmarks: ${benchmarks[*]}"
-echo "CUDA device count: ${gpu_count}; max parallel workers: ${max_parallel}"
-
-run_benchmark() {
-  local bench="$1"
-  local gpu_id="$2"
-  local bench_log="${bench_log_dir}/${bench}.log"
-  local eval_args=(
-    "config=${eval_config}"
-    "ckpt_path=${ckpt_path}"
-    "run_only=[${bench}]"
-  )
-
-  if [[ -n "${ckpt_epoch}" ]]; then
-    eval_args+=("ckpt_epoch=${ckpt_epoch}")
-  fi
-
-  if [[ -n "${ckpt_use_ema}" ]]; then
-    eval_args+=("ckpt_use_ema=${ckpt_use_ema}")
-  fi
-
-  if [[ -n "${batch_size}" ]]; then
-    eval_args+=("generation_config.batch_size=${batch_size}")
-  fi
-
-  if [[ -n "${eval_extra_args}" ]]; then
-    read -r -a parsed_eval_extra_args <<< "${eval_extra_args}"
-    eval_args+=("${parsed_eval_extra_args[@]}")
-  fi
-
-  (
-    cd "${eval_workdir}"
-    CUDA_VISIBLE_DEVICES="${gpu_id}" python -m evaluation.main "${eval_args[@]}"
-  ) > >(tee -a "${bench_log}" | sed -u "s/^/[${bench}] /") 2> >(tee -a "${bench_log}" >&2)
-}
-
-active_jobs=0
-pids=()
-pid_names=()
-next_gpu=0
-failed=0
-
-for bench in "${benchmarks[@]}"; do
-  gpu_id="${next_gpu}"
-  next_gpu=$(((next_gpu + 1) % gpu_count))
-
-  run_benchmark "${bench}" "${gpu_id}" &
-  pids+=("$!")
-  pid_names+=("${bench}")
-  active_jobs=$((active_jobs + 1))
-
-  if (( active_jobs >= max_parallel )); then
-    if ! wait "${pids[0]}"; then
-      echo "Benchmark ${pid_names[0]} failed." >&2
-      failed=1
-    fi
-    pids=("${pids[@]:1}")
-    pid_names=("${pid_names[@]:1}")
-    active_jobs=$((active_jobs - 1))
-  fi
-done
-
-for i in "${!pids[@]}"; do
-  if ! wait "${pids[$i]}"; then
-    echo "Benchmark ${pid_names[$i]} failed." >&2
-    failed=1
-  fi
-done
-
-if (( failed != 0 )); then
-  exit 1
+if [[ -n "${eval_extra_args}" ]]; then
+  # Hydra overrides should not contain spaces. Use this for simple key=value args.
+  read -r -a parsed_eval_extra_args <<< "${eval_extra_args}"
+  eval_args+=("${parsed_eval_extra_args[@]}")
 fi
 
-echo "All selected benchmarks finished."
+cd "${eval_workdir}"
+python -m evaluation.sharded_main "${eval_args[@]}"
