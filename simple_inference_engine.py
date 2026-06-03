@@ -34,6 +34,20 @@ class InferenceCheckpoint:
         return self.tokenizer.decode(tokens)  # pyright: ignore[reportReturnType]
 
 
+def _resolve_tokenizer_path(tokenizer_path: str) -> str:
+    path = Path(tokenizer_path)
+    candidates = [path] if path.is_absolute() else [Path.cwd() / path]
+
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.is_file() and resolved.name == "tokenizer.json":
+            return str(resolved.parent)
+        if resolved.exists():
+            return str(resolved)
+
+    return tokenizer_path
+
+
 def inference_load_checkpoint(ckpt_path: str, ckpt_epoch: Optional[int], ckpt_use_ema: bool):
     # Load Checkpoint
     # Load config
@@ -81,7 +95,8 @@ def inference_load_checkpoint(ckpt_path: str, ckpt_epoch: Optional[int], ckpt_us
     model = model.to(getattr(torch, model_cfg.fwd_bwd_dtype)).eval()
 
     # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(train_metadata.tokenizer_info["tokenizer_path"], use_fast=True)
+    tokenizer_path = _resolve_tokenizer_path(train_metadata.tokenizer_info["tokenizer_path"])
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, use_fast=True)
     return InferenceCheckpoint(
         model=model,
         carry=carry,
