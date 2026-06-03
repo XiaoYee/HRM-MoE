@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -21,6 +22,7 @@ EVAL_DATA_FILES: tuple[tuple[str, str], ...] = (
     ("EleutherAI/hendrycks_math", "prealgebra/test-00000-of-00001.parquet"),
     ("EleutherAI/hendrycks_math", "precalculus/test-00000-of-00001.parquet"),
     ("EleutherAI/drop", "drop_validation.parquet"),
+    ("TIGER-Lab/MMLU-Pro", "data/test-00000-of-00001.parquet"),
     ("cais/mmlu", "all/dev-00000-of-00001.parquet"),
     ("cais/mmlu", "all/test-00000-of-00001.parquet"),
     ("allenai/ai2_arc", "ARC-Challenge/validation-00000-of-00001.parquet"),
@@ -31,10 +33,21 @@ EVAL_DATA_FILES: tuple[tuple[str, str], ...] = (
     ("allenai/winogrande", "winogrande_debiased/validation-00000-of-00001.parquet"),
     ("google/boolq", "data/train-00000-of-00001.parquet"),
     ("google/boolq", "data/validation-00000-of-00001.parquet"),
+    ("math-ai/aime25", "test.jsonl"),
 )
 
 
-def _validate_parquet(path: Path) -> int:
+def _validate_file(path: Path, relative_path: str) -> int:
+    if relative_path.endswith(".jsonl"):
+        rows = 0
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                json.loads(line)
+                rows += 1
+        return rows
+
     try:
         import pyarrow.parquet as pq
     except ImportError:
@@ -62,7 +75,7 @@ def _download_one(
     label = f"{repo_id}/{relative_path}"
 
     if destination.is_file() and destination.stat().st_size > 0 and not force:
-        return label, destination, _validate_parquet(destination), True
+        return label, destination, _validate_file(destination, relative_path), True
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = destination.with_name(f".{destination.name}.tmp.{os.getpid()}")
@@ -75,7 +88,7 @@ def _download_one(
                 if chunk:
                     f.write(chunk)
 
-    rows = _validate_parquet(tmp_path)
+    rows = _validate_file(tmp_path, relative_path)
     tmp_path.replace(destination)
     return label, destination, rows, False
 

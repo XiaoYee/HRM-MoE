@@ -1,0 +1,12 @@
+engine: SimpleEngine
+ckpt_path: null
+
+generation_config:
+  batch_size: 16
+  max_context: 4096
+  max_tokens: 1024
+  temperature: 0.0
+  condition: "synth,cot"
+
+benchmarks:
+  - name: MMLUPro

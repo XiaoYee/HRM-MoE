@@ -21,31 +21,45 @@ _MATH_SUBSETS = [
     "precalculus",
 ]
 
-_LOCAL_DATASET_FILES: dict[tuple[str, str, str], tuple[str, str]] = {
-    ("gsm8k", "main", "test"): ("openai/gsm8k", "main/test-00000-of-00001.parquet"),
-    ("EleutherAI/drop", "", "validation"): ("EleutherAI/drop", "drop_validation.parquet"),
-    ("cais/mmlu", "all", "dev"): ("cais/mmlu", "all/dev-00000-of-00001.parquet"),
-    ("cais/mmlu", "all", "test"): ("cais/mmlu", "all/test-00000-of-00001.parquet"),
+_LOCAL_DATASET_FILES: dict[tuple[str, str, str], tuple[str, str, str]] = {
+    ("gsm8k", "main", "test"): ("openai/gsm8k", "main/test-00000-of-00001.parquet", "parquet"),
+    ("EleutherAI/drop", "", "validation"): ("EleutherAI/drop", "drop_validation.parquet", "parquet"),
+    ("TIGER-Lab/MMLU-Pro", "default", "test"): (
+        "TIGER-Lab/MMLU-Pro",
+        "data/test-00000-of-00001.parquet",
+        "parquet",
+    ),
+    ("cais/mmlu", "all", "dev"): ("cais/mmlu", "all/dev-00000-of-00001.parquet", "parquet"),
+    ("cais/mmlu", "all", "test"): ("cais/mmlu", "all/test-00000-of-00001.parquet", "parquet"),
     ("allenai/ai2_arc", "ARC-Challenge", "validation"): (
         "allenai/ai2_arc",
         "ARC-Challenge/validation-00000-of-00001.parquet",
+        "parquet",
     ),
     ("allenai/ai2_arc", "ARC-Challenge", "test"): (
         "allenai/ai2_arc",
         "ARC-Challenge/test-00000-of-00001.parquet",
+        "parquet",
     ),
-    ("Rowan/hellaswag", "", "train"): ("Rowan/hellaswag", "data/train-00000-of-00001.parquet"),
-    ("Rowan/hellaswag", "", "validation"): ("Rowan/hellaswag", "data/validation-00000-of-00001.parquet"),
+    ("Rowan/hellaswag", "", "train"): ("Rowan/hellaswag", "data/train-00000-of-00001.parquet", "parquet"),
+    ("Rowan/hellaswag", "", "validation"): (
+        "Rowan/hellaswag",
+        "data/validation-00000-of-00001.parquet",
+        "parquet",
+    ),
     ("allenai/winogrande", "winogrande_debiased", "train"): (
         "allenai/winogrande",
         "winogrande_debiased/train-00000-of-00001.parquet",
+        "parquet",
     ),
     ("allenai/winogrande", "winogrande_debiased", "validation"): (
         "allenai/winogrande",
         "winogrande_debiased/validation-00000-of-00001.parquet",
+        "parquet",
     ),
-    ("google/boolq", "", "train"): ("google/boolq", "data/train-00000-of-00001.parquet"),
-    ("google/boolq", "", "validation"): ("google/boolq", "data/validation-00000-of-00001.parquet"),
+    ("google/boolq", "", "train"): ("google/boolq", "data/train-00000-of-00001.parquet", "parquet"),
+    ("google/boolq", "", "validation"): ("google/boolq", "data/validation-00000-of-00001.parquet", "parquet"),
+    ("math-ai/aime25", "", "test"): ("math-ai/aime25", "test.jsonl", "json"),
 }
 
 _LOCAL_DATASET_FILES.update(
@@ -53,6 +67,7 @@ _LOCAL_DATASET_FILES.update(
         ("EleutherAI/hendrycks_math", subset, "test"): (
             "EleutherAI/hendrycks_math",
             f"{subset}/test-00000-of-00001.parquet",
+            "parquet",
         )
         for subset in _MATH_SUBSETS
     }
@@ -86,7 +101,7 @@ def _load_eval_dataset(path: str, name: Optional[str] = None, split: str = "trai
             f"No local eval dataset mapping for path={path!r}, name={name!r}, split={split_name!r}. "
             "Unset HRM_EVAL_DATA_DIR to use Hugging Face datasets online."
         )
-    repo_id, relative_path = _LOCAL_DATASET_FILES[key]
+    repo_id, relative_path, file_format = _LOCAL_DATASET_FILES[key]
     data_file = root / repo_id / relative_path
     if not data_file.is_file():
         raise FileNotFoundError(
@@ -94,7 +109,7 @@ def _load_eval_dataset(path: str, name: Optional[str] = None, split: str = "trai
             f"Run scripts/download_eval_data.py --output {root}"
         )
 
-    dataset = load_dataset("parquet", data_files=str(data_file), split="train")
+    dataset = load_dataset(file_format, data_files=str(data_file), split="train")
     if limit is not None:
         dataset = dataset.select(range(min(limit, len(dataset))))
     return dataset

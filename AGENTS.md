@@ -128,6 +128,8 @@ ckpt_path=/path/to/checkpoints/run_dir run_only='[GSM8k,MATH]' bash scripts/rjob
 ckpt_path=/path/to/checkpoints/run_dir ckpt_epoch=1 batch_size=16 bash scripts/rjob_hrm_eval.sh
 ckpt_path=/path/to/checkpoints/run_dir ckpt_epoch=1 num_gpus=8 batch_size=16 entrypoint=scripts/hrm_eval_fanout_entrypoint.sh bash scripts/rjob_hrm_eval.sh
 ckpt_path=/path/to/checkpoints/run_dir ckpt_epoch=1 num_gpus=8 batch_size=16 bash scripts/rjob_hrm_eval_after_epoch.sh
+ckpt_path=/path/to/checkpoints/run_dir ckpt_epoch=1 num_gpus=8 batch_size=16 entrypoint=scripts/hrm_eval_fanout_entrypoint.sh eval_config=/mnt/shared-storage-user/quxiaoye/HRM-Text/evaluation/config/hrm_mmlu_pro_benchmarking.yaml eval_data_dir=/mnt/shared-storage-user/quxiaoye/HRM-Text/eval_data_hf_parquet hf_datasets_offline=1 bash scripts/rjob_hrm_eval.sh
+ckpt_path=/path/to/checkpoints/run_dir ckpt_epoch=1 num_gpus=8 entrypoint=scripts/hrm_eval_fanout_entrypoint.sh eval_config=/mnt/shared-storage-user/quxiaoye/HRM-Text/evaluation/config/hrm_maj_vote_benchmarking.yaml eval_data_dir=/mnt/shared-storage-user/quxiaoye/HRM-Text/eval_data_hf_parquet hf_datasets_offline=1 bash scripts/rjob_hrm_eval.sh
 ```
 
 Default rjob settings are intentionally close to the reference project:
@@ -367,6 +369,13 @@ python scripts/prepare_sft_data.py \
   files under the repo. Use a writable temporary prefix, e.g.
   `PYTHONPYCACHEPREFIX=/tmp/hrm_pycache_check python -m py_compile ...`, rather
   than changing ownership of generated cache files during debugging.
+- MMLU-Pro and AIME are not part of `evaluation/config/hrm_benchmarking.yaml`.
+  Use `evaluation/config/hrm_mmlu_pro_benchmarking.yaml` for MMLU-Pro and
+  `evaluation/config/hrm_maj_vote_benchmarking.yaml` for AIME majority voting.
+  MMLU-Pro local data is `TIGER-Lab/MMLU-Pro/data/test-00000-of-00001.parquet`;
+  AIME25 local data is `math-ai/aime25/test.jsonl`, so the local eval loader
+  must use the `json` dataset builder for AIME instead of assuming every cached
+  benchmark file is parquet.
 
 ## Local Validation
 
