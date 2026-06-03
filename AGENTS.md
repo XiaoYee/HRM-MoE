@@ -340,6 +340,33 @@ python scripts/prepare_sft_data.py \
   client combines the job name with `generated-task-0` for a Kubernetes label,
   so descriptive checkpoint-derived names can exceed the 63-character label
   limit even before the job is submitted.
+- Full benchmark eval rjobs should not depend on live Hugging Face Hub dataset
+  resolution. Compute-node `datasets.load_dataset(...)` has failed here with
+  proxy errors even when direct file downloads from the login node worked.
+  Download the required benchmark parquet files to shared storage with
+  `scripts/download_eval_data.py`, then launch eval with
+  `eval_data_dir=/mnt/shared-storage-user/quxiaoye/HRM-Text/eval_data_hf_parquet`
+  so `HRM_EVAL_DATA_DIR` is passed into the rjob.
+- When using local parquet eval data, setting `HF_DATASETS_OFFLINE=1` is useful
+  because it proves benchmark construction is not secretly falling back to Hub
+  access. Missing local mappings should fail fast before model inference.
+- Python 3.12 evaluates stricter `typing` generics at import time. Use
+  `Generator[yield_type, send_type, return_type]`; a two-argument
+  `Generator[...]` annotation can kill all eval shards before inference starts.
+- Current HRM checkpoints may store tokenizer paths like
+  `../trained_tokenizers/bpe/tokenizer.json`. Eval runs from
+  `/mnt/shared-storage-user/quxiaoye/data_io/tokenizer` so this resolves to the
+  shared `data_io/trained_tokenizers` directory. Resolve the path before calling
+  `AutoTokenizer.from_pretrained`, and pass the tokenizer directory rather than
+  the raw `tokenizer.json` file path.
+- `torch.compile` can fail on eval prefill/decode with FA3 custom ops because
+  Dynamo fake tensors do not support `flash_attn_3.fwd.default` in this image.
+  Keep inference compile optional with `HRM_EVAL_TORCH_COMPILE=1`; default to
+  eager execution for bring-up and correctness runs.
+- Local `py_compile` can fail because rjobs create root-owned `__pycache__`
+  files under the repo. Use a writable temporary prefix, e.g.
+  `PYTHONPYCACHEPREFIX=/tmp/hrm_pycache_check python -m py_compile ...`, rather
+  than changing ownership of generated cache files during debugging.
 
 ## Local Validation
 
