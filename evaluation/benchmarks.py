@@ -1,13 +1,109 @@
 from typing import Any, Optional, Callable
+import os
 import re
 from collections import defaultdict, Counter
 from dataclasses import dataclass
+from pathlib import Path
 
 from datasets import load_dataset, get_dataset_config_names
 from math_verify import parse, verify
 from lm_eval.tasks.drop.utils import process_results as drop_process_results, process_docs as drop_process_docs
 
 from utils.functions import last_boxed_only_string, compute_benchmark_micro_macro_avg
+
+_MATH_SUBSETS = [
+    "algebra",
+    "counting_and_probability",
+    "geometry",
+    "intermediate_algebra",
+    "number_theory",
+    "prealgebra",
+    "precalculus",
+]
+
+_LOCAL_DATASET_FILES: dict[tuple[str, str, str], tuple[str, str]] = {
+    ("gsm8k", "main", "test"): ("openai/gsm8k", "main/test-00000-of-00001.parquet"),
+    ("EleutherAI/drop", "", "validation"): ("EleutherAI/drop", "drop_validation.parquet"),
+    ("cais/mmlu", "all", "dev"): ("cais/mmlu", "all/dev-00000-of-00001.parquet"),
+    ("cais/mmlu", "all", "test"): ("cais/mmlu", "all/test-00000-of-00001.parquet"),
+    ("allenai/ai2_arc", "ARC-Challenge", "validation"): (
+        "allenai/ai2_arc",
+        "ARC-Challenge/validation-00000-of-00001.parquet",
+    ),
+    ("allenai/ai2_arc", "ARC-Challenge", "test"): (
+        "allenai/ai2_arc",
+        "ARC-Challenge/test-00000-of-00001.parquet",
+    ),
+    ("Rowan/hellaswag", "", "train"): ("Rowan/hellaswag", "data/train-00000-of-00001.parquet"),
+    ("Rowan/hellaswag", "", "validation"): ("Rowan/hellaswag", "data/validation-00000-of-00001.parquet"),
+    ("allenai/winogrande", "winogrande_debiased", "train"): (
+        "allenai/winogrande",
+        "winogrande_debiased/train-00000-of-00001.parquet",
+    ),
+    ("allenai/winogrande", "winogrande_debiased", "validation"): (
+        "allenai/winogrande",
+        "winogrande_debiased/validation-00000-of-00001.parquet",
+    ),
+    ("google/boolq", "", "train"): ("google/boolq", "data/train-00000-of-00001.parquet"),
+    ("google/boolq", "", "validation"): ("google/boolq", "data/validation-00000-of-00001.parquet"),
+}
+
+_LOCAL_DATASET_FILES.update(
+    {
+        ("EleutherAI/hendrycks_math", subset, "test"): (
+            "EleutherAI/hendrycks_math",
+            f"{subset}/test-00000-of-00001.parquet",
+        )
+        for subset in _MATH_SUBSETS
+    }
+)
+
+
+def _local_eval_data_root() -> Optional[Path]:
+    value = os.environ.get("HRM_EVAL_DATA_DIR", "").strip()
+    if not value:
+        return None
+    return Path(value)
+
+
+def _split_name_and_limit(split: str) -> tuple[str, Optional[int]]:
+    match = re.fullmatch(r"([A-Za-z0-9_.-]+)(?:\[:([0-9]+)\])?", split)
+    if match is None:
+        raise ValueError(f"Unsupported local dataset split expression: {split}")
+    limit = int(match.group(2)) if match.group(2) is not None else None
+    return match.group(1), limit
+
+
+def _load_eval_dataset(path: str, name: Optional[str] = None, split: str = "train"):
+    root = _local_eval_data_root()
+    if root is None:
+        return load_dataset(path, name, split=split)
+
+    split_name, limit = _split_name_and_limit(split)
+    key = (path, name or "", split_name)
+    if key not in _LOCAL_DATASET_FILES:
+        raise KeyError(
+            f"No local eval dataset mapping for path={path!r}, name={name!r}, split={split_name!r}. "
+            "Unset HRM_EVAL_DATA_DIR to use Hugging Face datasets online."
+        )
+    repo_id, relative_path = _LOCAL_DATASET_FILES[key]
+    data_file = root / repo_id / relative_path
+    if not data_file.is_file():
+        raise FileNotFoundError(
+            f"Local eval dataset file is missing: {data_file}. "
+            f"Run scripts/download_eval_data.py --output {root}"
+        )
+
+    dataset = load_dataset("parquet", data_files=str(data_file), split="train")
+    if limit is not None:
+        dataset = dataset.select(range(min(limit, len(dataset))))
+    return dataset
+
+
+def _get_eval_dataset_config_names(path: str) -> list[str]:
+    if _local_eval_data_root() is not None and path == "EleutherAI/hendrycks_math":
+        return list(_MATH_SUBSETS)
+    return get_dataset_config_names(path)
 
 class BaseBenchmark:
     def __init__(self):
@@ -28,7 +124,7 @@ class GSM8k(BaseBenchmark):
     def __init__(self, split: str = "test"):
         super().__init__()
 
-        dataset = load_dataset("gsm8k", "main", split=split)
+        dataset = _load_eval_dataset("gsm8k", "main", split=split)
         self.prompts = dataset["question"]
         self.ground_truths = [self._extract_truth(sol) for sol in dataset["answer"]]
 
@@ -66,8 +162,8 @@ class MATH(BaseBenchmark):
     def __init__(self, split: str = "test"):
         super().__init__()
 
-        for subset in get_dataset_config_names("EleutherAI/hendrycks_math"):
-            dataset = load_dataset("EleutherAI/hendrycks_math", subset, split=split)
+        for subset in _get_eval_dataset_config_names("EleutherAI/hendrycks_math"):
+            dataset = _load_eval_dataset("EleutherAI/hendrycks_math", subset, split=split)
             for item in dataset:
                 label = last_boxed_only_string(item["solution"])  # type: ignore
                 assert label is not None
@@ -107,7 +203,7 @@ class DROP(BaseBenchmark):
         assert 0 <= num_shots <= len(self.EXAMPLES), f"num_shots must be between 0 and {len(self.EXAMPLES)}"
         prefix = "".join(f"{shot}\n\n" for shot in self.EXAMPLES[:num_shots])
 
-        dataset = load_dataset("EleutherAI/drop", split=split)
+        dataset = _load_eval_dataset("EleutherAI/drop", split=split)
 
         self.ground_truths: list[dict[str, Any]] = list(drop_process_docs(dataset))  # pyright: ignore[reportAttributeAccessIssue]
         self.prompts = [
@@ -134,7 +230,7 @@ class DROP(BaseBenchmark):
 class MMLUPro(BaseBenchmark):
     def __init__(self, split: str = "test"):
         super().__init__()
-        dataset = load_dataset("TIGER-Lab/MMLU-Pro", "default", split=split)
+        dataset = _load_eval_dataset("TIGER-Lab/MMLU-Pro", "default", split=split)
         for item in dataset:
             prompt = item["question"] + "\nOptions:\n"  # type: ignore
             current_options = []
@@ -235,13 +331,13 @@ class MMLU(StandardMCQBenchmark):
         special_shots = special_shots or {}
 
         # Load dev shots
-        shot_ds = load_dataset("cais/mmlu", "all", split="dev")
+        shot_ds = _load_eval_dataset("cais/mmlu", "all", split="dev")
         shot_docs = defaultdict(lambda: [])
         for row in shot_ds:
             shot_docs[row["subject"]].append(MCQDoc(row['question'], row['choices'], row['answer']))  # type: ignore
 
         # Load test
-        ds = load_dataset("cais/mmlu", "all", split=split)
+        ds = _load_eval_dataset("cais/mmlu", "all", split=split)
         for row in ds:
             subject: str = row["subject"]  # type: ignore
             doc = MCQDoc(row['question'], row['choices'], row['answer'])  # type: ignore
@@ -278,13 +374,13 @@ class HFMCQBenchmark(StandardMCQBenchmark):
     ):
         super().__init__()
         # Load eval dataset
-        eval_ds = load_dataset(path, name, split=split)
+        eval_ds = _load_eval_dataset(path, name, split=split)
         eval_docs = [row_to_doc_fn(row) for row in eval_ds]  # pyright: ignore[reportArgumentType]
         
         # Load shot dataset efficiently using slice notation
         shot_docs = []
         if num_shots > 0:
-            shot_ds = load_dataset(path, name, split=f"{shot_split}[:{num_shots}]")
+            shot_ds = _load_eval_dataset(path, name, split=f"{shot_split}[:{num_shots}]")
             shot_docs = [row_to_doc_fn(row) for row in shot_ds]  # pyright: ignore[reportArgumentType]
             
         for doc in eval_docs:
@@ -337,7 +433,7 @@ class AIMEMajorityVoting(BaseBenchmark):
         self.n = n
         self.pass_k = pass_k
 
-        dataset = load_dataset(f"math-ai/aime{year}", split="test")
+        dataset = _load_eval_dataset(f"math-ai/aime{year}", split="test")
         for item in dataset:
             # Extract answer: 'answer' col -> Extract from 'solution' col
             gt: str = item.get("answer")  # type: ignore

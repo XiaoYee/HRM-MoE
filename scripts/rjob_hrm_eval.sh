@@ -25,6 +25,7 @@ export HF_DATASETS_OFFLINE="${hf_datasets_offline:-${HF_DATASETS_OFFLINE:-}}"
 export HF_HUB_DISABLE_XET="${hf_hub_disable_xet:-${HF_HUB_DISABLE_XET:-}}"
 export HF_HUB_ETAG_TIMEOUT="${hf_hub_etag_timeout:-${HF_HUB_ETAG_TIMEOUT:-60}}"
 export HF_HUB_DOWNLOAD_TIMEOUT="${hf_hub_download_timeout:-${HF_HUB_DOWNLOAD_TIMEOUT:-120}}"
+export HRM_EVAL_DATA_DIR="${eval_data_dir:-${HRM_EVAL_DATA_DIR:-}}"
 
 if [[ -z "${ckpt_path:-}" ]]; then
   echo "Usage: ckpt_path=/path/to/checkpoints/run_dir [ckpt_epoch=1] [run_only='[GSM8k,MATH]'] bash scripts/rjob_hrm_eval.sh" >&2
@@ -38,5 +39,5 @@ export RJOB_HTTPS_PROXY="${rjob_https_proxy:-${RJOB_HTTPS_PROXY:-${https_proxy:-
 export RJOB_NO_PROXY="${rjob_no_proxy:-${RJOB_NO_PROXY:-${cluster_no_proxy_default}}}"
 
 export mode num_gpus job_name memory cpu auto_restart rdma host_network gang_start share_host_shm WANDB_MODE bootstrap entrypoint
-export ckpt_path ckpt_epoch ckpt_use_ema eval_config run_only batch_size eval_extra_args eval_workdir eval_max_parallel
+export ckpt_path ckpt_epoch ckpt_use_ema eval_config run_only batch_size eval_extra_args eval_workdir eval_max_parallel HRM_EVAL_DATA_DIR
 exec bash "${script_dir}/rjob_hrm_common.sh"

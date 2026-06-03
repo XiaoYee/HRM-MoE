@@ -41,10 +41,12 @@ export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
 export HF_ENDPOINT="${HF_ENDPOINT:-https://huggingface.co}"
 export HF_HUB_ETAG_TIMEOUT="${HF_HUB_ETAG_TIMEOUT:-60}"
 export HF_HUB_DOWNLOAD_TIMEOUT="${HF_HUB_DOWNLOAD_TIMEOUT:-120}"
+export HRM_EVAL_DATA_DIR="${HRM_EVAL_DATA_DIR:-}"
 
 echo "HRM fanout eval log file: ${log_file}"
 echo "HRM fanout eval benchmark logs: ${bench_log_dir}"
 echo "HRM fanout eval checkpoint: ${ckpt_path}"
+echo "HRM fanout eval data dir: ${HRM_EVAL_DATA_DIR:-<online datasets>}"
 
 if [[ "${bootstrap}" == "1" || "${bootstrap}" == "true" ]]; then
   python -m pip install --no-cache-dir \

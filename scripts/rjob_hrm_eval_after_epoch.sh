@@ -12,7 +12,7 @@ poll_interval="${poll_interval:-300}"
 stable_checks="${stable_checks:-3}"
 stable_interval="${stable_interval:-60}"
 force_submit="${force_submit:-false}"
-submit_dry_run="${submit_dry_run:-false}"
+submit_dry_run="${submit_dry_run:-${dry_run:-false}}"
 entrypoint="${entrypoint:-scripts/hrm_eval_fanout_entrypoint.sh}"
 eval_config="${eval_config:-${HRM_EVAL_CONFIG:-${repo_dir}/evaluation/config/hrm_benchmarking.yaml}}"
 
@@ -148,6 +148,10 @@ submit_eval() {
 
   if [[ -n "${eval_max_parallel:-}" ]]; then
     submit_env+=("eval_max_parallel=${eval_max_parallel}")
+  fi
+
+  if [[ -n "${eval_data_dir:-${HRM_EVAL_DATA_DIR:-}}" ]]; then
+    submit_env+=("eval_data_dir=${eval_data_dir:-${HRM_EVAL_DATA_DIR:-}}")
   fi
 
   if [[ -n "${ckpt_use_ema:-}" ]]; then

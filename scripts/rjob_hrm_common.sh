@@ -91,6 +91,7 @@ rjob_env=(
   -e "HRM_EVAL_EXTRA_ARGS=${eval_extra_args:-}"
   -e "HRM_EVAL_WORKDIR=${eval_workdir:-}"
   -e "HRM_EVAL_MAX_PARALLEL=${eval_max_parallel:-${HRM_EVAL_MAX_PARALLEL:-}}"
+  -e "HRM_EVAL_DATA_DIR=${HRM_EVAL_DATA_DIR:-${eval_data_dir:-}}"
   -e "WANDB_MODE=${WANDB_MODE:-online}"
 )
 
