@@ -113,7 +113,7 @@ def _batched_decode(model: nn.Module, carry: Carry, inputs: Tensor, cache: Any, 
 
 
 @torch.inference_mode()
-def inference_generate(ckpt: InferenceCheckpoint, iterator: Iterator[tuple[int, tuple[str, str]]], max_tokens: int, max_generation: int, batch_size: int, temp: float = 0.0) -> Generator[tuple[int, str], None]:
+def inference_generate(ckpt: InferenceCheckpoint, iterator: Iterator[tuple[int, tuple[str, str]]], max_tokens: int, max_generation: int, batch_size: int, temp: float = 0.0) -> Generator[tuple[int, str], None, None]:
     def fetch_next():
         for pid, p_tuple in iterator:
             tok = ckpt.tokenize_prompt(*p_tuple)
