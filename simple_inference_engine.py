@@ -48,6 +48,15 @@ def _resolve_tokenizer_path(tokenizer_path: str) -> str:
     return tokenizer_path
 
 
+def _compile_for_eval(**kwargs):
+    def decorator(fn):
+        enabled = os.environ.get("HRM_EVAL_TORCH_COMPILE", "").lower() in {"1", "true", "yes"}
+        if enabled:
+            return torch.compile(**kwargs)(fn)
+        return fn
+    return decorator
+
+
 def inference_load_checkpoint(ckpt_path: str, ckpt_epoch: Optional[int], ckpt_use_ema: bool):
     # Load Checkpoint
     # Load config
@@ -105,7 +114,7 @@ def inference_load_checkpoint(ckpt_path: str, ckpt_epoch: Optional[int], ckpt_us
     )
 
 
-@torch.compile(fullgraph=True)
+@_compile_for_eval(fullgraph=True)
 def _sample_gumbel(logits: Tensor, temp: Tensor):
     scaled_logits = logits.to(torch.float32) / temp
     return (scaled_logits - torch.log(-torch.log(torch.rand_like(scaled_logits).clamp_min(torch.finfo(scaled_logits.dtype).tiny)))).argmax(-1)
@@ -117,12 +126,12 @@ def _sample(logits: Tensor, temp: float) -> Tensor:
     return _sample_gumbel(logits, torch.tensor(temp, dtype=torch.float32))
 
 
-@torch.compile(fullgraph=True)
+@_compile_for_eval(fullgraph=True)
 def _prefill(model: nn.Module, carry: Carry, inputs: Tensor, cache: Any) -> Tensor:
-    return model(carry=carry, batch={"inputs": inputs.unsqueeze(0), "position_ids": torch.arange(inputs.shape[0]), "cache": cache, "cache_lengths": 0})[-1][..., -1, :]
+    return model(carry=carry, batch={"inputs": inputs.unsqueeze(0), "position_ids": torch.arange(inputs.shape[0], device=inputs.device), "cache": cache, "cache_lengths": 0})[-1][..., -1, :]
 
 
-@torch.compile(dynamic=False, fullgraph=True)
+@_compile_for_eval(dynamic=False, fullgraph=True)
 def _batched_decode(model: nn.Module, carry: Carry, inputs: Tensor, cache: Any, cache_lengths: Tensor) -> Tensor:
     return model(carry=carry, batch={"inputs": inputs.unsqueeze(-1), "position_ids": cache_lengths.unsqueeze(-1), "cache": cache, "cache_lengths": cache_lengths})[-1][..., -1, :]
 
