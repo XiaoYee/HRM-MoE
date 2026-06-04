@@ -232,6 +232,82 @@ class SparseMoEExpertShard(nn.Module):
         return final_hidden_states
 
 
+def grouped_mm(input: Tensor, weight: Tensor, offsets: Tensor) -> Tensor:
+    if hasattr(F, "grouped_mm"):
+        return F.grouped_mm(input, weight, offs=offsets)
+    return torch._grouped_mm(input, weight, offs=offsets)
+
+
+class SparseMoEGroupedExperts(nn.Module):
+    def __init__(self,
+                 hidden_size: int,
+                 intermediate_size: int,
+                 num_experts: int,
+                 init_std_in=None,
+                 init_std_out=None,
+                 **kwargs):
+        super().__init__()
+        if num_experts <= 0:
+            raise ValueError(f"num_experts must be positive, got {num_experts}")
+
+        if init_std_in is None:
+            init_std_in = 1.0 / (hidden_size ** 0.5)
+        if init_std_out is None:
+            init_std_out = 1.0 / (intermediate_size ** 0.5)
+
+        self.num_experts = num_experts
+        self.expert_in_one_shard = num_experts
+
+        self.gate_up_weight = nn.Parameter(
+            trunc_normal_init_(
+                torch.empty((num_experts, 2 * intermediate_size, hidden_size), **kwargs),
+                std=init_std_in
+            )
+        )
+        self.down_weight = nn.Parameter(
+            trunc_normal_init_(
+                torch.empty((num_experts, hidden_size, intermediate_size), **kwargs),
+                std=init_std_out
+            )
+        )
+
+    def forward(self,
+                hidden_states: Tensor,
+                selected_experts: Tensor,
+                routing_weights: Tensor,
+                final_hidden_states: Tensor) -> Tensor:
+        num_tokens = hidden_states.shape[0]
+        if num_tokens == 0:
+            return final_hidden_states
+
+        top_k = selected_experts.shape[-1]
+        flat_experts = selected_experts.reshape(-1)
+        flat_weights = routing_weights.reshape(-1)
+        flat_token_idx = torch.arange(num_tokens, device=hidden_states.device).repeat_interleave(top_k)
+
+        sorted_experts, sort_idx = torch.sort(flat_experts, stable=True)
+        sorted_token_idx = flat_token_idx.index_select(0, sort_idx)
+        sorted_weights = flat_weights.index_select(0, sort_idx)
+        sorted_hidden_states = hidden_states.index_select(0, sorted_token_idx)
+
+        tokens_per_expert = torch.bincount(sorted_experts, minlength=self.num_experts)
+        max_tokens_per_expert = int(tokens_per_expert.max().item())
+        expert_offsets = torch.zeros((self.num_experts + 1,), device=hidden_states.device, dtype=torch.long)
+        expert_offsets[1:] = torch.cumsum(tokens_per_expert, dim=0)
+        positions_in_expert = torch.arange(sorted_experts.shape[0], device=hidden_states.device) - expert_offsets.index_select(0, sorted_experts)
+
+        grouped_hidden_states = hidden_states.new_zeros((self.num_experts, max_tokens_per_expert, hidden_states.shape[-1]))
+        grouped_hidden_states[sorted_experts, positions_in_expert] = sorted_hidden_states
+
+        gate_up = torch.bmm(grouped_hidden_states, self.gate_up_weight.transpose(1, 2))
+        gate, up = gate_up.chunk(2, dim=-1)
+        grouped_expert_output = torch.bmm(F.silu(gate) * up, self.down_weight.transpose(1, 2))
+        expert_output = grouped_expert_output[sorted_experts, positions_in_expert]
+        expert_output = expert_output * sorted_weights[:, None]
+        final_hidden_states.index_add_(0, sorted_token_idx, expert_output.to(hidden_states.dtype))
+        return final_hidden_states
+
+
 class SparseMoEExpertCollection(nn.Module):
     def __init__(self, experts: Sequence[nn.Module], expert_in_one_shard: int):
         super().__init__()
@@ -276,6 +352,7 @@ class SparseMoESwiGLU(nn.Module):
                  num_experts: int,
                  top_k: int,
                  norm_topk_prob: bool,
+                 implementation: Literal["origin", "shard", "grouped"] = "origin",
                  expert_in_one_shard: int = 1,
                  init_std_in=None,
                  init_std_out=None,
@@ -295,9 +372,19 @@ class SparseMoESwiGLU(nn.Module):
         self.num_experts = num_experts
         self.top_k = top_k
         self.norm_topk_prob = norm_topk_prob
+        self.implementation = implementation
         self.expert_in_one_shard = expert_in_one_shard
 
         self.gate = LinearInit(hidden_size, num_experts, bias=False, init_std=init_std_in, **kwargs)
+        if implementation == "grouped":
+            self.experts = SparseMoEGroupedExperts(hidden_size=hidden_size,
+                                                   intermediate_size=intermediate_size,
+                                                   num_experts=num_experts,
+                                                   init_std_in=init_std_in,
+                                                   init_std_out=init_std_out,
+                                                   **kwargs)
+            return
+
         if expert_in_one_shard == 1:
             experts = [
                 SwiGLU(hidden_size=hidden_size,

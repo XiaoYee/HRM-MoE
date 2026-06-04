@@ -33,7 +33,7 @@ class TransformerConfig(BaseModel):
     moe_intermediate_size: Optional[int] = None
     moe_norm_topk_prob: bool = True
     moe_router_aux_loss_coef: float = 0.0
-    moe_implementation: Literal["origin", "shard"] = "origin"
+    moe_implementation: Literal["origin", "shard", "grouped"] = "origin"
     moe_expert_in_one_shard: int = 1
 
     attn_type: AttnType = "prefixlm"
@@ -95,6 +95,7 @@ class TransformerBlock(nn.Module):
                 num_experts=config.moe_num_experts,
                 top_k=config.moe_top_k,
                 norm_topk_prob=config.moe_norm_topk_prob,
+                implementation=config.moe_implementation,
                 expert_in_one_shard=(config.moe_expert_in_one_shard if config.moe_implementation == "shard" else 1),
 
                 init_std_in=config.init_config.in_std,

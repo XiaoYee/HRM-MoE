@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-04 19:48 HKT。
+最后更新：2026-06-04 20:08 HKT。
 
 ## 16 卡基线实验
 
@@ -101,6 +101,11 @@ Checkpoint 完成时间：
   `arch_size=XL_moe64x8` 启动。
 - 新增配置 `config/arch/size/XL_moe64x8_shard.yaml`，保持 64 选 8 不变，
   但使用 `moe_implementation=shard`、`moe_expert_in_one_shard=8`。
+- 新增配置 `config/arch/size/XL_moe64x8_grouped.yaml`，保持 64 选 8 不变，
+  但使用 `moe_implementation=grouped`。第一版尝试 ATen `grouped_mm`
+  前向很快但反向卡住；最终采用 padded batched GEMM：按 expert 稳定排序
+  token/top-k assignment，填充成 `[num_experts, max_tokens_per_expert, hidden]`，
+  用两次 `torch.bmm` 完成 gate/up 和 down，再 scatter 回原 token。
 
 本地检查：
 
@@ -112,6 +117,9 @@ Checkpoint 完成时间：
 | 2026-06-04 19:21 HKT | `python -m py_compile ...` | passed | 覆盖 shard/FSDP 修改后的 `models/*.py`、`pretrain.py` 和等价测试脚本。 |
 | 2026-06-04 19:35 HKT | `python -m py_compile ...` | passed | dense 对照前复查 MoE 相关 Python 文件语法。 |
 | 2026-06-04 19:35 HKT | `python scripts/test_moe_shard_equivalence.py` | passed | 再次确认 origin/shard 的前向、aux loss、expert counts、输入梯度、router 梯度和 expert 梯度等价。 |
+| 2026-06-04 19:54 HKT | `python -m py_compile ...` | passed | 覆盖 grouped expert compute 修改后的 `models/layers.py`、`models/transformer.py` 和等价测试脚本。 |
+| 2026-06-04 19:54 HKT | `python scripts/test_moe_shard_equivalence.py` | passed | 升级为 origin/shard/grouped 三路等价测试，覆盖 forward、aux loss、expert counts、输入梯度、router 梯度和 expert 权重梯度。 |
+| 2026-06-04 20:01 HKT | `python scripts/test_moe_shard_equivalence.py` | passed | grouped 训练路径从 ATen `grouped_mm` 切到 padded `torch.bmm` 后再次确认三路精度等价。 |
 
 Smoke 任务记录：
 
@@ -129,6 +137,9 @@ Smoke 任务记录：
 | 2026-06-04 19:22 HKT | `hrm-moe64x8-shard-bp2-gb8192-06041922` | 8 x H200 | shard MoE, `global_batch_size=8192`, `bp_steps=2` | failed | FSDP2 不能直接 `fully_shard(ModuleList)`，报 `does not support containers that do not implement forward`。修复：引入有 `forward()` 的 `SparseMoEExpertCollection` 包住 expert shards。 |
 | 2026-06-04 19:25 HKT | `hrm-moe64x8-shard-bp2-gb8192-06041925` | 8 x H200 | shard MoE, `global_batch_size=8192`, `bp_steps=2`, `log_interval=999` | succeeded | shard + expert FSDP 包装完整跑通并自然退出：forward 3.887s、backward 2.851s、optimizer 0.230s、zero-grad 0.002s，打印 `Reached max_steps=1`。参数量 5,413,797,888。 |
 | 2026-06-04 19:27 HKT | `hrm-moe64x8-shard-reduce-bp2-gb8192-06041927` | 8 x H200 | shard MoE, `global_batch_size=8192`, `bp_steps=2`, `log_interval=1` | succeeded | 验证 metrics reduce 修复：forward 3.740s、backward 2.513s、optimizer 0.228s、zero-grad 0.002s、`reduce_metrics_done` 0.006s、`wandb_log_done` 0.002s，完整自然退出。 |
+| 2026-06-04 19:55 HKT | `hrm-moe64x8-grouped-bp2-gb8192-06041955` | 8 x H200 | grouped MoE, ATen `grouped_mm`, `global_batch_size=8192`, `bp_steps=2` | stopped | 前向很快：`forward_done elapsed=0.771s`，但超过 2 分钟没有 `backward_done`，卡在 `loss.backward()`。判断为当前容器/PyTorch 的 `grouped_mm` backward/wgrad 路径不适合本训练链路；停止任务，改用 padded `torch.bmm` 训练路径。 |
+| 2026-06-04 20:01 HKT | `hrm-moe64x8-grouped-bmm-bp2-gb8192-06042001` | 8 x H200 | grouped MoE, padded `torch.bmm`, `global_batch_size=8192`, `bp_steps=2` | succeeded | grouped-bmm 完整跑通并自然退出：forward 0.892s、backward 0.258s、optimizer 0.110s、zero-grad 0.001s、`reduce_metrics_done` 0.001s、`wandb_log_done` 0.002s。核心训练段 1.261s，参数量 5,413,797,888。 |
+| 2026-06-04 20:04 HKT | `hrm-dense-xl-bp2-gb8192-06042004` | 8 x H200 | Dense XL 对照, `global_batch_size=8192`, `bp_steps=2` | succeeded | 为 grouped-bmm 结果补最新 dense 对照：forward 0.473s、backward 0.107s、optimizer 0.087s、zero-grad 0.001s。核心训练段 0.668s。 |
 
 ### 2026-06-04 19:34 HKT dense 对照与 MoE shard 性能对比
 
@@ -213,6 +224,53 @@ Smoke 任务记录：
   aux loss、expert counts、输入梯度、router 梯度和 expert 梯度等价测试，再跑
   8 卡 smoke。MoE 的精度风险主要来自路由顺序、scatter 聚合顺序和 dtype 提前
   cast，不能只用 loss 能下降来判断正确。
+
+### 2026-06-04 20:01 HKT grouped expert compute 达标记录
+
+严格目标：本轮把“接近 dense”量化为同口径核心训练段不超过 Dense XL 的 2x。
+原因是 64x8 MoE 即使每 token 激活 FLOPs 约等于 dense FFN，也额外包含 router、
+top-k、expert 排序、scatter/gather、padding，以及更大总参数带来的 FSDP/optimizer
+开销；因此 1.0x dense 不是现实的第一阶段目标。
+
+实现摘要：
+
+- `models/layers.py` 新增 grouped expert compute。它先把
+  `selected_experts` 按 token-major/top-k-major 展平，再按 expert 稳定排序；
+  每个 expert 内顺序与 origin 的 `torch.where` 路径一致。
+- 为避免当前 ATen `grouped_mm` backward 卡住，训练路径使用 padded
+  `torch.bmm`：将 sorted token 填充到
+  `[num_experts, max_tokens_per_expert, hidden]`，执行 batched gate/up GEMM 和
+  batched down GEMM，然后按原 token index `index_add_` 回写。
+- `models/transformer.py` 支持 `moe_implementation=grouped`；新增
+  `config/arch/size/XL_moe64x8_grouped.yaml`。
+- `scripts/test_moe_shard_equivalence.py` 已升级为 origin/shard/grouped 三路精度
+  等价测试。
+
+同口径 single-step 结果：
+
+| 模型 | Job | 状态 | forward | backward | optimizer | zero-grad | 核心训练段 | 加 metrics/log | 单步 wall |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Dense XL | `hrm-dense-xl-bp2-gb8192-06042004` | succeeded | 0.473s | 0.107s | 0.087s | 0.001s | 0.668s | 0.671s | 4.28s |
+| MoE 64x8 shard | `hrm-moe64x8-shard-reduce-bp2-gb8192-06041927` | succeeded | 3.740s | 2.513s | 0.228s | 0.002s | 6.483s | 6.491s | 10.08s |
+| MoE 64x8 grouped-bmm | `hrm-moe64x8-grouped-bmm-bp2-gb8192-06042001` | succeeded | 0.892s | 0.258s | 0.110s | 0.001s | 1.261s | 1.264s | 5.91s |
+
+慢速比例：
+
+| 对比 | 核心训练段比例 | 结论 |
+| --- | ---: | --- |
+| shard / dense | 9.71x | shard 只优化了 FSDP/optimizer，expert compute 仍然是逐 expert loop。 |
+| grouped-bmm / dense | 1.89x | 达到“<= 2x dense”的严格第一阶段目标。 |
+| grouped-bmm / shard | 0.19x | grouped-bmm 相比 shard 核心训练段约 5.1x 加速。 |
+
+下一步加速空间：
+
+- 当前 grouped-bmm 已接近 dense，但仍有约 0.59s 核心段差距。主要剩余开销来自
+  router/top-k、sort、padding scatter/gather，以及 padded bmm 的 padding 计算。
+- ATen `grouped_mm` forward 更快，但 backward/wgrad 在本容器链路下卡住；不能直接
+  用作训练路径。后续如果要冲到 1.2x-1.5x dense，应优先接 XTuner 的 Triton/CUTLASS
+  grouped GEMM，并单独验证 wgrad 精度和 FSDP 梯度归约。
+- 任何更低层 kernel 替换都必须先通过 origin/shard/grouped forward 和梯度等价测试，
+  再跑 8 卡 smoke；MoE 精度仍然是硬门槛。
 
 经验：
 

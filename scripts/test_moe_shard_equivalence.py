@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Check origin and shard MoE implementations are numerically equivalent."""
+"""Check origin, shard, and grouped MoE implementations are numerically equivalent."""
 
 import torch
 import sys
@@ -19,33 +19,43 @@ sys.modules.setdefault("flash_attn_interface", flash_interface_stub)
 from models.layers import SparseMoESwiGLU
 
 
-def copy_origin_to_shard(origin: SparseMoESwiGLU, shard: SparseMoESwiGLU) -> None:
+def copy_origin_to_moe(origin: SparseMoESwiGLU, target: SparseMoESwiGLU) -> None:
     with torch.no_grad():
-        shard.gate.weight.copy_(origin.gate.weight)
+        target.gate.weight.copy_(origin.gate.weight)
 
         for expert_idx, origin_expert in enumerate(origin.experts):
-            shard_idx = expert_idx // shard.expert_in_one_shard
-            local_idx = expert_idx % shard.expert_in_one_shard
-            shard_expert = shard.experts[shard_idx]
-            shard_expert.gate_up_weight[local_idx].copy_(origin_expert.gate_up_proj.weight)
-            shard_expert.down_weight[local_idx].copy_(origin_expert.down_proj.weight)
+            if hasattr(target.experts, "gate_up_weight"):
+                target.experts.gate_up_weight[expert_idx].copy_(origin_expert.gate_up_proj.weight)
+                target.experts.down_weight[expert_idx].copy_(origin_expert.down_proj.weight)
+            else:
+                shard_idx = expert_idx // target.expert_in_one_shard
+                local_idx = expert_idx % target.expert_in_one_shard
+                shard_expert = target.experts[shard_idx]
+                shard_expert.gate_up_weight[local_idx].copy_(origin_expert.gate_up_proj.weight)
+                shard_expert.down_weight[local_idx].copy_(origin_expert.down_proj.weight)
 
 
-def assert_expert_grads_equal(origin: SparseMoESwiGLU, shard: SparseMoESwiGLU) -> None:
+def assert_expert_grads_equal(origin: SparseMoESwiGLU, target: SparseMoESwiGLU) -> None:
     for expert_idx, origin_expert in enumerate(origin.experts):
-        shard_idx = expert_idx // shard.expert_in_one_shard
-        local_idx = expert_idx % shard.expert_in_one_shard
-        shard_expert = shard.experts[shard_idx]
+        if hasattr(target.experts, "gate_up_weight"):
+            target_gate_up_grad = target.experts.gate_up_weight.grad[expert_idx]
+            target_down_grad = target.experts.down_weight.grad[expert_idx]
+        else:
+            shard_idx = expert_idx // target.expert_in_one_shard
+            local_idx = expert_idx % target.expert_in_one_shard
+            shard_expert = target.experts[shard_idx]
+            target_gate_up_grad = shard_expert.gate_up_weight.grad[local_idx]
+            target_down_grad = shard_expert.down_weight.grad[local_idx]
 
         torch.testing.assert_close(
             origin_expert.gate_up_proj.weight.grad,
-            shard_expert.gate_up_weight.grad[local_idx],
+            target_gate_up_grad,
             rtol=1e-5,
             atol=1e-6,
         )
         torch.testing.assert_close(
             origin_expert.down_proj.weight.grad,
-            shard_expert.down_weight.grad[local_idx],
+            target_down_grad,
             rtol=1e-5,
             atol=1e-6,
         )
@@ -61,24 +71,36 @@ def main() -> None:
         norm_topk_prob=True,
     )
 
-    origin = SparseMoESwiGLU(**kwargs, expert_in_one_shard=1)
-    shard = SparseMoESwiGLU(**kwargs, expert_in_one_shard=4)
-    copy_origin_to_shard(origin, shard)
+    origin = SparseMoESwiGLU(**kwargs, implementation="origin", expert_in_one_shard=1)
+    shard = SparseMoESwiGLU(**kwargs, implementation="shard", expert_in_one_shard=4)
+    grouped = SparseMoESwiGLU(**kwargs, implementation="grouped", expert_in_one_shard=1)
+    copy_origin_to_moe(origin, shard)
+    copy_origin_to_moe(origin, grouped)
 
     x_origin = torch.randn(5, 7, 16, requires_grad=True)
     x_shard = x_origin.detach().clone().requires_grad_(True)
+    x_grouped = x_origin.detach().clone().requires_grad_(True)
     grad = torch.randn_like(x_origin)
 
     origin_context = {"aux_losses": [], "expert_counts": []}
     shard_context = {"aux_losses": [], "expert_counts": []}
+    grouped_context = {"aux_losses": [], "expert_counts": []}
 
     out_origin = origin(x_origin, moe_context=origin_context)
     out_shard = shard(x_shard, moe_context=shard_context)
+    out_grouped = grouped(x_grouped, moe_context=grouped_context)
 
     torch.testing.assert_close(out_origin, out_shard, rtol=1e-5, atol=1e-6)
+    torch.testing.assert_close(out_origin, out_grouped, rtol=1e-5, atol=1e-6)
     torch.testing.assert_close(
         torch.stack(origin_context["aux_losses"]),
         torch.stack(shard_context["aux_losses"]),
+        rtol=1e-6,
+        atol=1e-7,
+    )
+    torch.testing.assert_close(
+        torch.stack(origin_context["aux_losses"]),
+        torch.stack(grouped_context["aux_losses"]),
         rtol=1e-6,
         atol=1e-7,
     )
@@ -88,17 +110,28 @@ def main() -> None:
         rtol=0,
         atol=0,
     )
+    torch.testing.assert_close(
+        torch.stack(origin_context["expert_counts"]),
+        torch.stack(grouped_context["expert_counts"]),
+        rtol=0,
+        atol=0,
+    )
 
     loss_origin = (out_origin * grad).sum() + torch.stack(origin_context["aux_losses"]).sum()
     loss_shard = (out_shard * grad).sum() + torch.stack(shard_context["aux_losses"]).sum()
+    loss_grouped = (out_grouped * grad).sum() + torch.stack(grouped_context["aux_losses"]).sum()
     loss_origin.backward()
     loss_shard.backward()
+    loss_grouped.backward()
 
     torch.testing.assert_close(x_origin.grad, x_shard.grad, rtol=1e-5, atol=1e-6)
+    torch.testing.assert_close(x_origin.grad, x_grouped.grad, rtol=1e-5, atol=1e-6)
     torch.testing.assert_close(origin.gate.weight.grad, shard.gate.weight.grad, rtol=1e-5, atol=1e-6)
+    torch.testing.assert_close(origin.gate.weight.grad, grouped.gate.weight.grad, rtol=1e-5, atol=1e-6)
     assert_expert_grads_equal(origin, shard)
+    assert_expert_grads_equal(origin, grouped)
 
-    print("origin/shard MoE equivalence: ok")
+    print("origin/shard/grouped MoE equivalence: ok")
 
 
 if __name__ == "__main__":
