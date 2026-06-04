@@ -437,6 +437,12 @@ python scripts/prepare_sft_data.py \
   only if the rjob image/toolchain matches and BF16 training gradients pass the
   HRM gate; fused gate/up or fused dispatch-combine kernels must include
   training backward validation, not just faster forward timing.
+- Do not directly set `HRM_MOE_TRITON_BLOCK_M=256` with the current
+  `num_stages=3` Triton grouped GEMM configs. The CUDA/bfloat16 gate job
+  `hrm-moe-bm256-eq-06050045` failed at Triton compile time with shared memory
+  `Required: 327704, Hardware limit: 232448`. Larger block-M exploration needs
+  lower-stage configs or OOR-tolerant autotune first, then the normal
+  CUDA/bfloat16 equivalence gate.
 
 ## Local Validation
 

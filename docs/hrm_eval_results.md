@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-05 00:41 HKT。
+最后更新：2026-06-05 00:48 HKT。
 
 ## 16 卡基线实验
 
@@ -532,6 +532,39 @@ GitHub/外部实现继续调研：
 1. 确认 4 个 replica 进入 `RUNNING`，并检查日志是否进入 `World Size 32`。
 2. 如果训练启动失败，先定位首因并记录；不要把后续 rank 的 NCCL/TCPStore 退出当首因。
 3. 训练挂起后继续做 MoE 效率优化，但新优化仍必须先过本地等价和 CUDA/bfloat16 gate。
+
+00:46 HKT 更新：
+
+- `rjob list` 显示 4 个 replica 全部 `RUNNING`。
+- rank0 日志确认 `torchrun --nnodes=4 --nproc_per_node=8`，并进入
+  `[Rank *, World Size 32]: Epoch 1`。
+- W&B 使用 offline：`wandb/offline-run-20260604_164256-ni3cinqr`。
+- 进度条已从 `0/304789` 推进到约 `190/304789`，约 `1.2-1.4 it/s`，说明不是
+  只完成容器启动，而是已经实际执行训练 step。
+- 当前没有看到 `Traceback`、`RuntimeError`、OOM、NCCL failure 或 W&B credential
+  失败。
+
+同一时间启动剩余 8 卡效率 gate：
+
+| 项目 | 值 |
+| --- | --- |
+| Job | `hrm-moe-bm256-eq-06050045` |
+| 目的 | 测试 Triton grouped GEMM `BLOCK_M=256` 是否保持 CUDA/bfloat16 梯度等价 |
+| 资源 | 8 张 H200，单节点 |
+| 状态 | 2026-06-05 00:46 HKT 为 `RUNNING` |
+| 精度约束 | origin/shard/grouped/grouped_triton/grouped_cutlass/grouped_ep 前向、aux、expert counts、输入梯度、router 梯度、expert 梯度等价 |
+| 处理规则 | 只有通过 gate 后才允许排性能 smoke；失败则不测速、不采用 |
+
+00:48 HKT 更新：
+
+- `hrm-moe-bm256-eq-06050045` 失败，不进入性能 smoke。
+- 失败首因不是数值 mismatch，而是 Triton 编译资源不足：
+  `OutOfResources: shared memory, Required: 327704, Hardware limit: 232448`。
+- 结论：当前 `num_stages=3` 的 grouped GEMM kernel 不能直接把 `BLOCK_M` 拉到 256。
+  如果继续探索大 `BLOCK_M`，需要降低 `num_stages` 或增加可跳过 OOR config 的
+  autotune 逻辑，并重新从 CUDA/bfloat16 gate 开始。
+- 为避免影响正在运行的 `hrm-moe32g-gt06050041`，后续效率代码改动应在单独
+  worktree 中完成，再用独立 rjob 验证。
 
 ## 评测设置
 
