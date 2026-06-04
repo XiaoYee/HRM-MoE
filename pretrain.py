@@ -80,6 +80,7 @@ class PretrainConfig(pydantic.BaseModel):
     log_interval: int = 5
     compile_train_batch: bool = True
     profile_train_batch: bool = False
+    fsdp_wrap_moe_experts: bool = True
     max_steps: Optional[int] = None
 
 
@@ -154,6 +155,9 @@ def create_model_and_carry(config: PretrainConfig, train_metadata: V1DatasetMeta
     # Detect TransformerBlock recursively and apply FSDP
     for module in model.modules():
         if isinstance(module, TransformerBlock):
+            moe_experts = getattr(getattr(module, "mlp", None), "experts", None)
+            if config.fsdp_wrap_moe_experts and moe_experts is not None:
+                apply_fsdp(moe_experts, fwd_bwd_dtype)
             apply_fsdp(module, fwd_bwd_dtype)
 
     apply_fsdp(model, fwd_bwd_dtype)
@@ -399,12 +403,16 @@ def launch(hydra_config: DictConfig):
                 profile=config.profile_train_batch and RANK == 0,
                 **train_extra_args
             )
+            post_step_mark = profile_mark(config.profile_train_batch and RANK == 0, "train_batch_return")
 
             if train_state.step % config.log_interval == 0:
+                post_step_mark = profile_mark(config.profile_train_batch and RANK == 0, "reduce_metrics_start", post_step_mark)
                 metrics = reduce_metrics(metrics, prefix="train/")
+                post_step_mark = profile_mark(config.profile_train_batch and RANK == 0, "reduce_metrics_done", post_step_mark)
                 if RANK == 0:
                     progress_bar.update(train_state.step - progress_bar.n)  # type: ignore
                     wandb.log(metrics | train_extra_args | {"train/lr": lr}, step=train_state.step)
+                    profile_mark(config.profile_train_batch, "wandb_log_done", post_step_mark)
 
             del metrics
 

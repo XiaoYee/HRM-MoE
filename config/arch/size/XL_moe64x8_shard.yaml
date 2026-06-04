@@ -15,13 +15,15 @@ pos_emb_type: rope
 # NOTE: Maybe larger init increases non-residual contribution, and layers are more effective?
 init_type: lecun_normal
 
-# Qwen-style sparse MoE FFN.
+# Qwen/XTuner-style sparse MoE FFN with grouped expert shards.
 # Each dense SwiGLU FFN has intermediate_size=4096 for XL. With top_k=8 and
 # moe_intermediate_size=512, active expert FFN width matches the dense FFN.
+# The shard implementation keeps routing math identical to origin while
+# grouping eight experts in one parameter shard for FSDP.
 moe_num_experts: 64
 moe_top_k: 8
 moe_intermediate_size: 512
 moe_norm_topk_prob: true
 moe_router_aux_loss_coef: 0.001
-moe_implementation: origin
-moe_expert_in_one_shard: 1
+moe_implementation: shard
+moe_expert_in_one_shard: 8

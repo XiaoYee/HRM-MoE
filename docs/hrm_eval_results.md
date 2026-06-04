@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-04 18:51 HKT。
+最后更新：2026-06-04 19:31 HKT。
 
 ## 16 卡基线实验
 
@@ -83,7 +83,10 @@ Checkpoint 完成时间：
 实现记录：
 
 - `models/layers.py` 新增 `SparseMoESwiGLU`，使用无 bias router、top-k expert
-  dispatch、按 routing weight 加权输出，并记录 load-balancing aux loss。
+  dispatch、按 routing weight 加权输出，并记录 load-balancing aux loss。后续补充
+  `SparseMoEExpertCollection` / `SparseMoEExpertShard`，支持 origin 与 shard
+  两种等价实现：origin 是逐 expert `SwiGLU`，shard 是每 8 个 expert 堆叠成一个
+  有 `forward()` 的 module，便于 FSDP2 单独包 expert 参数。
 - `models/transformer.py` 新增 `moe_*` 配置项；`moe_num_experts>0` 时将
   TransformerBlock 的 dense `SwiGLU` 替换为 `SparseMoESwiGLU`。
 - `models/lm_head.py` 将 MoE aux loss 加到 CE loss 上，同时保留原始
@@ -91,8 +94,13 @@ Checkpoint 完成时间：
   `moe_aux_loss_scaled`、`moe_total_loss`、`moe_max_expert_frac`。
 - `pretrain.py` 新增 `max_steps` 和 `compile_train_batch`；MoE 配置会自动关闭
   `torch.compile`，因为 Qwen MoE 的动态 expert dispatch 对全图编译不友好。
+  后续补充 `fsdp_wrap_moe_experts`，按 pith-train 的 MoE/FSDP 思路先包
+  `layer.mlp.experts`，再包完整 `TransformerBlock`；同时增加
+  `reduce_metrics_start/done` 等 profile 点，定位 step 后卡住问题。
 - 新增配置 `config/arch/size/XL_moe64x8.yaml`，rjob 可用
   `arch_size=XL_moe64x8` 启动。
+- 新增配置 `config/arch/size/XL_moe64x8_shard.yaml`，保持 64 选 8 不变，
+  但使用 `moe_implementation=shard`、`moe_expert_in_one_shard=8`。
 
 本地检查：
 
@@ -100,6 +108,8 @@ Checkpoint 完成时间：
 | --- | --- | --- | --- |
 | 2026-06-04 18:27 HKT | `python -m py_compile ...` | passed | 覆盖 MoE 修改到的 Python 文件。 |
 | 2026-06-04 18:27 HKT | 小 MoE 前后向脚本 | 未在登录环境运行 | 登录环境缺 `einops`；按仓库约定，真实训练环境以后续 rjob 结果为准。 |
+| 2026-06-04 19:21 HKT | `python scripts/test_moe_shard_equivalence.py` | passed | 本地补用户态 `einops` 并在测试脚本中 stub FlashAttention；比较 origin/shard 的 forward、aux loss、expert counts、输入梯度、router 梯度和每个 expert 权重梯度，均通过。 |
+| 2026-06-04 19:21 HKT | `python -m py_compile ...` | passed | 覆盖 shard/FSDP 修改后的 `models/*.py`、`pretrain.py` 和等价测试脚本。 |
 
 Smoke 任务记录：
 
@@ -110,6 +120,13 @@ Smoke 任务记录：
 | 2026-06-04 18:35 HKT | `hrm-moe64x8-smk3-06041835` | 8 x H200 | `arch_size=XL_moe64x8`, `global_batch_size=32768`, `epochs=1`, `max_steps=2`, `log_interval=1`, `compile_train_batch=false`, `WANDB_MODE=offline` | stopped | 已进入 `World Size 8` 的 epoch 1，说明 Hydra、模型构建、FSDP 初始化通过；但每卡 4096 token 的首个 step 超过 5 分钟未完成，先停止，缩小 batch 继续调通链路。 |
 | 2026-06-04 18:42 HKT | `hrm-moe64x8-smk4-06041842` | 8 x H200 | `arch_size=XL_moe64x8`, `global_batch_size=8192`, `epochs=1`, `max_steps=1`, `log_interval=1`, `compile_train_batch=false`, `WANDB_MODE=offline` | failed | 已进入 epoch 1，但在第一个 step 的 `update_lr` 失败：`total_steps=1` 且 `lr_warmup_steps=1` 时 cosine 分支分母为 0；修复方式是让 warmup 分支覆盖 `step <= warmup_steps`，并让 decay 分母至少为 1。 |
 | 2026-06-04 18:46 HKT | `hrm-moe64x8-smk5-06041845` | 8 x H200 | `arch_size=XL_moe64x8`, `global_batch_size=8192`, `epochs=1`, `max_steps=1`, `log_interval=1`, `compile_train_batch=false`, `WANDB_MODE=offline` | stopped | 已进入 `World Size 8` 的 epoch 1；每卡 1024 token 的首个 step 超过约 2.5 分钟未完成且日志无新增。为避免盲等，先停止并加入 `profile_train_batch` 打点，用下一轮定位 forward/backward/optimizer 慢点。 |
+| 2026-06-04 18:52 HKT | `hrm-moe64x8-prof06041852` | 8 x H200 | `arch_size=XL_moe64x8`, `global_batch_size=8192`, `max_steps=1`, `log_interval=1`, `profile_train_batch=true` | stopped | profile 显示 `forward_done elapsed=5.160s`，但没有 `backward_done`。首因不是 forward 路由，而是 smoke 里 `max_steps=1` 让 `total_steps=1`，HRM bp warmup 第一轮直接使用 `bp_steps=5`，反传图过深；后续 smoke 固定 `bp_steps=2`。 |
+| 2026-06-04 19:05 HKT | `hrm-moe64x8-basic-bp2-06041905` | 8 x H200 | origin MoE, `global_batch_size=1024`, `+arch.bp_min_steps=2`, `arch.bp_max_steps=2` | failed | 未进入训练。`arch.bp_min_steps` 不在 Hydra YAML struct 中，普通 override 失败；改用 `+arch.bp_min_steps=2`。 |
+| 2026-06-04 19:08 HKT | `hrm-moe64x8-basic-bp2-06041908` | 8 x H200 | origin MoE, `global_batch_size=1024`, `bp_steps=2` | succeeded | 该任务退出成功并保存 checkpoint，但无 `TrainProfile` / metrics，进度条停在 `0/1`；判断为 local batch 过小导致没有有效训练 batch，不能算训练链路跑通。 |
+| 2026-06-04 19:11 HKT | `hrm-moe64x8-basic-bp2-gb8192-06041911` | 8 x H200 | origin MoE, `global_batch_size=8192`, `bp_steps=2`, `log_interval=1` | stopped | 已完成实际 step：forward 4.255s、backward 2.680s、optimizer 0.940s、zero-grad 0.004s；但 step 后没有打印 `Reached max_steps`，卡在 metrics reduce 附近。修复：MoE metrics 在所有 rank 固定 key；增加 reduce profile。 |
+| 2026-06-04 19:22 HKT | `hrm-moe64x8-shard-bp2-gb8192-06041922` | 8 x H200 | shard MoE, `global_batch_size=8192`, `bp_steps=2` | failed | FSDP2 不能直接 `fully_shard(ModuleList)`，报 `does not support containers that do not implement forward`。修复：引入有 `forward()` 的 `SparseMoEExpertCollection` 包住 expert shards。 |
+| 2026-06-04 19:25 HKT | `hrm-moe64x8-shard-bp2-gb8192-06041925` | 8 x H200 | shard MoE, `global_batch_size=8192`, `bp_steps=2`, `log_interval=999` | succeeded | shard + expert FSDP 包装完整跑通并自然退出：forward 3.887s、backward 2.851s、optimizer 0.230s、zero-grad 0.002s，打印 `Reached max_steps=1`。参数量 5,413,797,888。 |
+| 2026-06-04 19:27 HKT | `hrm-moe64x8-shard-reduce-bp2-gb8192-06041927` | 8 x H200 | shard MoE, `global_batch_size=8192`, `bp_steps=2`, `log_interval=1` | succeeded | 验证 metrics reduce 修复：forward 3.740s、backward 2.513s、optimizer 0.228s、zero-grad 0.002s、`reduce_metrics_done` 0.006s、`wandb_log_done` 0.002s，完整自然退出。 |
 
 经验：
 
@@ -126,6 +143,24 @@ Smoke 任务记录：
 - 对慢 step 不能只看进度条；需要在 `train_batch` 内部打点区分 forward、
   backward、optimizer 和 zero-grad，否则无法判断是 MoE dispatch、FSDP
   all-gather/reduce，还是优化器状态初始化导致。
+- 对 HRM 这种有 bp warmup 的模型，`max_steps=1` 的 smoke 会让 warmup 进度直接
+  到 1；如果不显式固定 `bp_steps`，第一步可能就是完整反传。调试链路时使用
+  `+arch.bp_min_steps=2 arch.bp_max_steps=2`。
+- `global_batch_size` 过小会产生“成功但没训练”的假阳性；本次
+  `global_batch_size=1024` 退出成功但无 profile/metrics。后续 smoke 至少使用已知
+  会产出 batch 的 `global_batch_size=8192`，并以 `TrainProfile` 或 metrics 为准。
+- FSDP2 不能直接包 `ModuleList`。参考 XTuner 的 `ExpertShard` 和 pith-train 的
+  `Qwen3MoeExperts`，expert 参数容器必须是有 `forward()` 的 module；HRM 里用
+  `SparseMoEExpertCollection` 解决。
+- MoE 精度对齐不能只看 loss 能跑。当前约束是：router softmax 保持 fp32；
+  top-k 权重归一化后再 cast 回 hidden dtype；origin/shard 必须通过 forward、
+  aux loss、expert counts 和梯度等价测试；FSDP 加速只改变参数组织和 shard 粒度，
+  不改变路由语义。
+- 参考实现：
+  XTuner `mixtral/modeling_mixtral.py` 与 `deepseek_v2/modeling_deepseek.py`
+  使用 origin/shard 两种 MoE 实现；pith-train `qwen3_moe.py` 使用 Qwen3 grouped
+  expert、top-k router、load-balance loss injector，并在 FSDP 测试中单独包
+  `layer.mlp.experts`。
 
 ## 评测设置
 

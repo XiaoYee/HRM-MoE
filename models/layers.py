@@ -176,6 +176,99 @@ class SwiGLU(nn.Module):
         return self.down_proj(F.silu(gate) * up)
 
 
+class SparseMoEExpertShard(nn.Module):
+    def __init__(self,
+                 hidden_size: int,
+                 intermediate_size: int,
+                 expert_in_one_shard: int,
+                 shard_idx: int,
+                 init_std_in=None,
+                 init_std_out=None,
+                 **kwargs):
+        super().__init__()
+        if expert_in_one_shard <= 0:
+            raise ValueError(f"expert_in_one_shard must be positive, got {expert_in_one_shard}")
+
+        if init_std_in is None:
+            init_std_in = 1.0 / (hidden_size ** 0.5)
+        if init_std_out is None:
+            init_std_out = 1.0 / (intermediate_size ** 0.5)
+
+        self.expert_in_one_shard = expert_in_one_shard
+        self.shard_idx = shard_idx
+        self.expert_offset = shard_idx * expert_in_one_shard
+
+        self.gate_up_weight = nn.Parameter(
+            trunc_normal_init_(
+                torch.empty((expert_in_one_shard, 2 * intermediate_size, hidden_size), **kwargs),
+                std=init_std_in
+            )
+        )
+        self.down_weight = nn.Parameter(
+            trunc_normal_init_(
+                torch.empty((expert_in_one_shard, hidden_size, intermediate_size), **kwargs),
+                std=init_std_out
+            )
+        )
+
+    def forward(self,
+                hidden_states: Tensor,
+                selected_experts: Tensor,
+                routing_weights: Tensor,
+                final_hidden_states: Tensor) -> Tensor:
+        for local_idx in range(self.expert_in_one_shard):
+            expert_idx = self.expert_offset + local_idx
+            token_idx, topk_idx = torch.where(selected_experts == expert_idx)
+            if token_idx.numel() == 0:
+                continue
+
+            expert_input = hidden_states[token_idx]
+            gate_up = F.linear(expert_input, self.gate_up_weight[local_idx])
+            gate, up = gate_up.chunk(2, dim=-1)
+            expert_output = F.linear(F.silu(gate) * up, self.down_weight[local_idx])
+            expert_output = expert_output * routing_weights[token_idx, topk_idx, None]
+            final_hidden_states.index_add_(0, token_idx, expert_output.to(hidden_states.dtype))
+
+        return final_hidden_states
+
+
+class SparseMoEExpertCollection(nn.Module):
+    def __init__(self, experts: Sequence[nn.Module], expert_in_one_shard: int):
+        super().__init__()
+        self.layers = nn.ModuleList(experts)
+        self.expert_in_one_shard = expert_in_one_shard
+
+    def __len__(self) -> int:
+        return len(self.layers)
+
+    def __iter__(self):
+        return iter(self.layers)
+
+    def __getitem__(self, idx: int) -> nn.Module:
+        return self.layers[idx]
+
+    def forward(self,
+                hidden_states: Tensor,
+                selected_experts: Tensor,
+                routing_weights: Tensor,
+                final_hidden_states: Tensor) -> Tensor:
+        if self.expert_in_one_shard == 1:
+            for expert_idx, expert_layer in enumerate(self.layers):
+                token_idx, topk_idx = torch.where(selected_experts == expert_idx)
+                if token_idx.numel() == 0:
+                    continue
+
+                expert_input = hidden_states[token_idx]
+                expert_output = expert_layer(expert_input)
+                expert_output = expert_output * routing_weights[token_idx, topk_idx, None]
+                final_hidden_states.index_add_(0, token_idx, expert_output.to(hidden_states.dtype))
+        else:
+            for expert_shard in self.layers:
+                final_hidden_states = expert_shard(hidden_states, selected_experts, routing_weights, final_hidden_states)
+
+        return final_hidden_states
+
+
 class SparseMoESwiGLU(nn.Module):
     def __init__(self,
                  hidden_size: int,
@@ -183,6 +276,7 @@ class SparseMoESwiGLU(nn.Module):
                  num_experts: int,
                  top_k: int,
                  norm_topk_prob: bool,
+                 expert_in_one_shard: int = 1,
                  init_std_in=None,
                  init_std_out=None,
                  **kwargs):
@@ -191,21 +285,40 @@ class SparseMoESwiGLU(nn.Module):
             raise ValueError(f"num_experts must be positive, got {num_experts}")
         if top_k <= 0 or top_k > num_experts:
             raise ValueError(f"top_k must be in [1, num_experts], got top_k={top_k}, num_experts={num_experts}")
+        if expert_in_one_shard <= 0 or num_experts % expert_in_one_shard != 0:
+            raise ValueError(
+                f"expert_in_one_shard must divide num_experts, got "
+                f"expert_in_one_shard={expert_in_one_shard}, num_experts={num_experts}"
+            )
 
         self.hidden_size = hidden_size
         self.num_experts = num_experts
         self.top_k = top_k
         self.norm_topk_prob = norm_topk_prob
+        self.expert_in_one_shard = expert_in_one_shard
 
         self.gate = LinearInit(hidden_size, num_experts, bias=False, init_std=init_std_in, **kwargs)
-        self.experts = nn.ModuleList([
-            SwiGLU(hidden_size=hidden_size,
-                   intermediate_size=intermediate_size,
-                   init_std_in=init_std_in,
-                   init_std_out=init_std_out,
-                   **kwargs)
-            for _ in range(num_experts)
-        ])
+        if expert_in_one_shard == 1:
+            experts = [
+                SwiGLU(hidden_size=hidden_size,
+                       intermediate_size=intermediate_size,
+                       init_std_in=init_std_in,
+                       init_std_out=init_std_out,
+                       **kwargs)
+                for _ in range(num_experts)
+            ]
+        else:
+            experts = [
+                SparseMoEExpertShard(hidden_size=hidden_size,
+                                     intermediate_size=intermediate_size,
+                                     expert_in_one_shard=expert_in_one_shard,
+                                     shard_idx=shard_idx,
+                                     init_std_in=init_std_in,
+                                     init_std_out=init_std_out,
+                                     **kwargs)
+                for shard_idx in range(num_experts // expert_in_one_shard)
+            ]
+        self.experts = SparseMoEExpertCollection(experts, expert_in_one_shard)
 
     def forward(self,
                 x: Tensor,
@@ -222,16 +335,12 @@ class SparseMoESwiGLU(nn.Module):
             routing_weights = routing_weights / routing_weights.sum(dim=-1, keepdim=True).clamp_min(1e-12)
         routing_weights = routing_weights.to(hidden_states.dtype)
 
-        final_hidden_states = torch.zeros_like(hidden_states)
-        for expert_idx, expert_layer in enumerate(self.experts):
-            token_idx, topk_idx = torch.where(selected_experts == expert_idx)
-            if token_idx.numel() == 0:
-                continue
-
-            expert_input = hidden_states[token_idx]
-            expert_output = expert_layer(expert_input)
-            expert_output = expert_output * routing_weights[token_idx, topk_idx, None]
-            final_hidden_states.index_add_(0, token_idx, expert_output.to(hidden_states.dtype))
+        final_hidden_states = self.experts(
+            hidden_states,
+            selected_experts,
+            routing_weights,
+            torch.zeros_like(hidden_states),
+        )
 
         if moe_context is not None and torch.is_grad_enabled():
             aux_routing_probs = routing_probs

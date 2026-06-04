@@ -63,6 +63,8 @@ class LMHead(nn.Module):
             dist.all_reduce(loss_divisor, op=dist.ReduceOp.AVG)
             loss = ce_loss / loss_divisor
 
+            aux_loss = None
+            aux_loss_scaled = None
             if moe_context is not None and moe_context["aux_losses"]:
                 aux_loss = torch.stack(moe_context["aux_losses"]).mean()
                 aux_loss_scaled = aux_loss * getattr(self.model, "moe_router_aux_loss_coef", 0.0)
@@ -83,12 +85,20 @@ class LMHead(nn.Module):
                     "exact_accuracy": (((seq_num_tokens_correct == seq_num_valid_tokens) & seq_is_valid).sum(), seq_is_valid.sum()),
                 }
 
-                if moe_context is not None and moe_context["aux_losses"]:
+                if moe_context is not None:
                     one = torch.ones((), dtype=torch.float32, device=loss.device)
-                    expert_counts = torch.stack(moe_context["expert_counts"]).sum(dim=0)
+                    zero = torch.zeros((), dtype=torch.float32, device=loss.device)
+                    if moe_context["expert_counts"]:
+                        expert_counts = torch.stack(moe_context["expert_counts"]).sum(dim=0)
+                    else:
+                        expert_counts = torch.zeros(
+                            getattr(self.model, "moe_num_experts", 0),
+                            dtype=torch.float32,
+                            device=loss.device,
+                        )
                     expert_count_total = expert_counts.sum().clamp_min(1.0)
-                    metrics["moe_aux_loss"] = (aux_loss.detach(), one)
-                    metrics["moe_aux_loss_scaled"] = (aux_loss_scaled.detach(), one)
+                    metrics["moe_aux_loss"] = ((aux_loss.detach() if aux_loss is not None else zero), one)
+                    metrics["moe_aux_loss_scaled"] = ((aux_loss_scaled.detach() if aux_loss_scaled is not None else zero), one)
                     metrics["moe_total_loss"] = (loss.detach(), one)
                     metrics["moe_max_expert_frac"] = ((expert_counts.max() / expert_count_total).detach(), one)
 
