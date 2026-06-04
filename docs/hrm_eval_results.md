@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-05 00:35 HKT。
+最后更新：2026-06-05 00:41 HKT。
 
 ## 16 卡基线实验
 
@@ -501,6 +501,37 @@ GitHub/外部实现继续调研：
    `max_steps=3` smoke -> 中文记录。
 4. 当前集群上 `hrm-pre32g-xl-e4-off0604` 仍在 RUNNING；为避免资源互相影响，本轮
    暂不新增 8 卡 MoE 性能任务，等资源窗口合适时只提交一个候选。
+
+### 2026-06-05 00:41 HKT 32 卡 MoE 长训启动
+
+按用户要求先启动 32 卡 MoE 训练，再继续做效率优化。本次使用当前已经通过精度 gate
+且速度最快的安全路径：`grouped_triton + autotune + SM_MARGIN=16`。没有引入
+新的未验证优化。
+
+| 项目 | 值 |
+| --- | --- |
+| Job | `hrm-moe32g-gt06050041` |
+| 状态 | 2026-06-05 00:41 HKT 已提交，4 个 replica 均为 `STARTING` |
+| 资源 | 32 张 H200，4 replicas x 8 GPUs |
+| Worktree | `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8` |
+| Branch | `codex/hrm-moe64x8` |
+| Commit | `8b4248a` |
+| Config | `cfg_pretrain`, `arch_size=XL_moe64x8_grouped_triton` |
+| 数据 | `/mnt/shared-storage-user/quxiaoye/HRM-Text/data_sampled_bpe_65k_e4_ctx4097` |
+| Checkpoint | `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8/checkpoints/hrm-moe32g-gt06050041` |
+| Epochs | 4 |
+| Global batch | 196,608 tokens |
+| MoE | 64 experts, top-k=8, expert intermediate=512 |
+| Triton env | `HRM_MOE_TRITON_AUTOTUNE=1`, `HRM_MOE_TRITON_SM_MARGIN=16` |
+| 其他参数 | `checkpoint_interval=1`, `log_interval=5`, `compile_train_batch=false`, `fsdp_wrap_moe_experts=true` |
+| W&B | `WANDB_MODE=offline`，避免 32 卡任务因 API key 缺失在 `wandb.init` 失败 |
+| auto_restart | `false` |
+
+后续动作：
+
+1. 确认 4 个 replica 进入 `RUNNING`，并检查日志是否进入 `World Size 32`。
+2. 如果训练启动失败，先定位首因并记录；不要把后续 rank 的 NCCL/TCPStore 退出当首因。
+3. 训练挂起后继续做 MoE 效率优化，但新优化仍必须先过本地等价和 CUDA/bfloat16 gate。
 
 ## 评测设置
 
