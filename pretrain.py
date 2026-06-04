@@ -6,6 +6,7 @@ import math
 import os
 import yaml
 import shutil
+import time
 
 import torch
 import torch.distributed as dist
@@ -78,6 +79,7 @@ class PretrainConfig(pydantic.BaseModel):
     checkpoint_interval: int = 1
     log_interval: int = 5
     compile_train_batch: bool = True
+    profile_train_batch: bool = False
     max_steps: Optional[int] = None
 
 
@@ -208,11 +210,27 @@ def update_lr(config: PretrainConfig, train_state: TrainState) -> float:
     return lr
 
 
-def train_batch_eager(train_state: TrainState, batch: dict[str, Tensor], **kwargs):
+def profile_mark(enabled: bool, message: str, start: Optional[float] = None) -> Optional[float]:
+    if not enabled:
+        return start
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    now = time.perf_counter()
+    elapsed = "" if start is None else f" elapsed={now - start:.3f}s"
+    print(f"[TrainProfile] {message}{elapsed}", flush=True)
+    return now
+
+
+def train_batch_eager(train_state: TrainState, batch: dict[str, Tensor], profile: bool = False, **kwargs):
+    mark = profile_mark(profile, "forward_start")
     train_state.carry, loss, metrics = train_state.model(batch=batch, carry=train_state.carry, **kwargs)
+    mark = profile_mark(profile, "forward_done", mark)
     loss.backward()
+    mark = profile_mark(profile, "backward_done", mark)
     train_state.optim.step()
+    mark = profile_mark(profile, "optim_step_done", mark)
     train_state.optim.zero_grad()
+    profile_mark(profile, "zero_grad_done", mark)
     return metrics
 
 
@@ -375,7 +393,12 @@ def launch(hydra_config: DictConfig):
             # Extra train arguments (such as BP warmup etc.)
             train_extra_args = train_state.model.compute_train_extra_args(train_state)  # pyright: ignore[reportCallIssue]
             
-            metrics = train_batch_fn(train_state, batch | {k: wrap_tensor(torch.tensor(v, device="cpu")) for k, v in batch_info.items()}, **train_extra_args)
+            metrics = train_batch_fn(
+                train_state,
+                batch | {k: wrap_tensor(torch.tensor(v, device="cpu")) for k, v in batch_info.items()},
+                profile=config.profile_train_batch and RANK == 0,
+                **train_extra_args
+            )
 
             if train_state.step % config.log_interval == 0:
                 metrics = reduce_metrics(metrics, prefix="train/")
