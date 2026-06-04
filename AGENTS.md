@@ -28,6 +28,10 @@ All agent code changes in this repository must be managed with git:
   AGENTS.md with durable lessons learned, reusable commands, and new pitfalls
   before committing. Treat this as part of the done criteria, not optional
   cleanup.
+- Record all future HRM experiment results in `docs/hrm_eval_results.md`.
+  Training runs, eval jobs, benchmark summaries, follow-up AIME/MMLU-Pro
+  results, and notable reruns should be appended there rather than scattered
+  across separate ad hoc notes.
 - Do not edit entrypoint scripts while an rjob is still reading them from shared
   storage. Prefer committing fixes, then launching a fresh rjob from that commit.
 
