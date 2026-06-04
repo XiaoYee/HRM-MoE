@@ -417,12 +417,26 @@ python scripts/prepare_sft_data.py \
   `sort_idx // top_k` just because it is algebraically equivalent. That
   token-index experiment passed local and CUDA/bfloat16 equivalence but slowed
   the same-shape Triton smoke, so it was reverted.
+- Do not move the routing weight multiply before the expert down projection in
+  HRM MoE just because it is algebraically equivalent. The pre-weight attempt
+  passed local CPU/fp32 equivalence but failed the CUDA/bfloat16 gate on router
+  gradients (`hrm-moe-preweight-eq-06050027`), with max absolute difference
+  0.1640625 against `atol=5e-2`. MoE precision is sensitive to bf16 rounding
+  placement; keep routing weights applied after the down projection unless a
+  new fused forward/backward kernel passes the full CUDA/bfloat16 gradient
+  gate.
 - GitHub directions for future MoE speed work: MegaBlocks supports continuing
   grouped-GEMM/block-sparse work; Tutel and DeepEP are more relevant for
   expert-parallel communication and parameter/communication isolation; use
   TorchTitan mainly as a reference for FSDP2 organization and observability.
   Any imported idea still needs HRM local equivalence, CUDA/bfloat16 gate, and
   same-shape training smoke before adoption.
+- Additional GitHub/kernel directions for the 1.2x dense MoE target: PyTorch's
+  persistent cache-aware grouped GEMM work supports further Triton scheduler,
+  grouped launch, and TMA-style tuning; DeepGEMM is a possible future backend
+  only if the rjob image/toolchain matches and BF16 training gradients pass the
+  HRM gate; fused gate/up or fused dispatch-combine kernels must include
+  training backward validation, not just faster forward timing.
 
 ## Local Validation
 
