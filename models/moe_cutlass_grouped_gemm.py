@@ -4,6 +4,8 @@ import torch
 from torch import Tensor
 import torch.nn.functional as F
 
+from models.moe_profile import record_moe_profile_phase
+
 
 try:
     from grouped_gemm import backend as _grouped_gemm_backend
@@ -37,9 +39,12 @@ class _CutlassGroupedLinear(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: Tensor):
         input, weight, batch_sizes = ctx.saved_tensors
-        grad_output = grad_output.contiguous()
-        grad_input = _grouped_gemm_backend.gmm(grad_output, weight, batch_sizes, trans_a=False, trans_b=False)
-        grad_weight = _grouped_gemm_backend.gmm(grad_output, input, batch_sizes, trans_a=True, trans_b=False)
+        with record_moe_profile_phase("grad_output_contiguous"):
+            grad_output = grad_output.contiguous()
+        with record_moe_profile_phase("grad_input_gemm"):
+            grad_input = _grouped_gemm_backend.gmm(grad_output, weight, batch_sizes, trans_a=False, trans_b=False)
+        with record_moe_profile_phase("grad_weight_gemm"):
+            grad_weight = _grouped_gemm_backend.gmm(grad_output, input, batch_sizes, trans_a=True, trans_b=False)
         return grad_input, grad_weight, None
 
 

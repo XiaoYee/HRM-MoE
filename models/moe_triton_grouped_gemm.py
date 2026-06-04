@@ -7,6 +7,8 @@ import torch
 from torch import Tensor
 import torch.nn.functional as F
 
+from models.moe_profile import record_moe_profile_phase
+
 
 try:
     import triton
@@ -464,9 +466,12 @@ class _TritonGroupedLinear(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: Tensor):
         input, weight, tokens_per_expert = ctx.saved_tensors
-        grad_output = grad_output.contiguous()
-        grad_input = _m_grouped_gemm(grad_output, weight, tokens_per_expert, trans_b=False)
-        grad_weight = _k_grouped_gemm(grad_output, input, tokens_per_expert)
+        with record_moe_profile_phase("grad_output_contiguous"):
+            grad_output = grad_output.contiguous()
+        with record_moe_profile_phase("grad_input_gemm"):
+            grad_input = _m_grouped_gemm(grad_output, weight, tokens_per_expert, trans_b=False)
+        with record_moe_profile_phase("grad_weight_gemm"):
+            grad_weight = _k_grouped_gemm(grad_output, input, tokens_per_expert)
         return grad_input, grad_weight, None
 
 

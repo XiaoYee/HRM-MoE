@@ -11,6 +11,7 @@ from einops import rearrange
 from models.common import trunc_normal_init_, unwrap_tensor
 from models.flash_attention_prefixlm_v2 import flash_attn_varlen_prefixlm
 from models.moe_cutlass_grouped_gemm import cutlass_grouped_linear
+from models.moe_profile import record_moe_profile_phase
 from models.moe_triton_grouped_gemm import triton_grouped_linear
 from flash_attn_interface import flash_attn_with_kvcache
 
@@ -293,53 +294,66 @@ class SparseMoEGroupedExperts(nn.Module):
         gate_up_weight = self.gate_up_weight.to(hidden_states.dtype)
         down_weight = self.down_weight.to(hidden_states.dtype)
         if self.backend == "loop":
-            for expert_idx in range(self.num_experts):
-                token_idx, topk_idx = torch.where(selected_experts == expert_idx)
-                if token_idx.numel() == 0:
-                    continue
+            with record_moe_profile_phase("loop_experts"):
+                for expert_idx in range(self.num_experts):
+                    token_idx, topk_idx = torch.where(selected_experts == expert_idx)
+                    if token_idx.numel() == 0:
+                        continue
 
-                expert_input = hidden_states[token_idx]
-                gate_up = F.linear(expert_input, gate_up_weight[expert_idx])
-                gate, up = gate_up.chunk(2, dim=-1)
-                expert_output = F.linear(F.silu(gate) * up, down_weight[expert_idx])
-                expert_output = expert_output * routing_weights[token_idx, topk_idx, None]
-                final_hidden_states.index_add_(0, token_idx, expert_output.to(hidden_states.dtype))
+                    expert_input = hidden_states[token_idx]
+                    gate_up = F.linear(expert_input, gate_up_weight[expert_idx])
+                    gate, up = gate_up.chunk(2, dim=-1)
+                    expert_output = F.linear(F.silu(gate) * up, down_weight[expert_idx])
+                    expert_output = expert_output * routing_weights[token_idx, topk_idx, None]
+                    final_hidden_states.index_add_(0, token_idx, expert_output.to(hidden_states.dtype))
             return final_hidden_states
 
-        top_k = selected_experts.shape[-1]
-        flat_experts = selected_experts.reshape(-1)
-        flat_weights = routing_weights.reshape(-1)
-        flat_token_idx = torch.arange(num_tokens, device=hidden_states.device).repeat_interleave(top_k)
+        with record_moe_profile_phase("dispatch"):
+            top_k = selected_experts.shape[-1]
+            flat_experts = selected_experts.reshape(-1)
+            flat_weights = routing_weights.reshape(-1)
+            flat_token_idx = torch.arange(num_tokens, device=hidden_states.device).repeat_interleave(top_k)
 
-        sorted_experts, sort_idx = torch.sort(flat_experts, stable=True)
-        sorted_token_idx = flat_token_idx.index_select(0, sort_idx)
-        sorted_weights = flat_weights.index_select(0, sort_idx)
-        sorted_hidden_states = hidden_states.index_select(0, sorted_token_idx)
+            sorted_experts, sort_idx = torch.sort(flat_experts, stable=True)
+            sorted_token_idx = flat_token_idx.index_select(0, sort_idx)
+            sorted_weights = flat_weights.index_select(0, sort_idx)
+            sorted_hidden_states = hidden_states.index_select(0, sorted_token_idx)
 
-        tokens_per_expert = torch.bincount(sorted_experts, minlength=self.num_experts)
+            tokens_per_expert = torch.bincount(sorted_experts, minlength=self.num_experts)
         if self.backend in ("triton", "cutlass"):
             grouped_linear = triton_grouped_linear if self.backend == "triton" else cutlass_grouped_linear
-            gate_up = grouped_linear(sorted_hidden_states, gate_up_weight, tokens_per_expert)
-            gate, up = gate_up.chunk(2, dim=-1)
-            expert_output = grouped_linear(F.silu(gate) * up, down_weight, tokens_per_expert)
-            expert_output = expert_output * sorted_weights[:, None]
-            final_hidden_states.index_add_(0, sorted_token_idx, expert_output.to(hidden_states.dtype))
+            with record_moe_profile_phase("gate_up_gemm"):
+                gate_up = grouped_linear(sorted_hidden_states, gate_up_weight, tokens_per_expert)
+            with record_moe_profile_phase("activation"):
+                gate, up = gate_up.chunk(2, dim=-1)
+                activated = F.silu(gate) * up
+            with record_moe_profile_phase("down_gemm"):
+                expert_output = grouped_linear(activated, down_weight, tokens_per_expert)
+            with record_moe_profile_phase("combine"):
+                expert_output = expert_output * sorted_weights[:, None]
+                final_hidden_states.index_add_(0, sorted_token_idx, expert_output.to(hidden_states.dtype))
             return final_hidden_states
 
-        max_tokens_per_expert = int(tokens_per_expert.max().item())
-        expert_offsets = torch.zeros((self.num_experts + 1,), device=hidden_states.device, dtype=torch.long)
-        expert_offsets[1:] = torch.cumsum(tokens_per_expert, dim=0)
-        positions_in_expert = torch.arange(sorted_experts.shape[0], device=hidden_states.device) - expert_offsets.index_select(0, sorted_experts)
+        with record_moe_profile_phase("bmm_pack"):
+            max_tokens_per_expert = int(tokens_per_expert.max().item())
+            expert_offsets = torch.zeros((self.num_experts + 1,), device=hidden_states.device, dtype=torch.long)
+            expert_offsets[1:] = torch.cumsum(tokens_per_expert, dim=0)
+            positions_in_expert = torch.arange(sorted_experts.shape[0], device=hidden_states.device) - expert_offsets.index_select(0, sorted_experts)
 
-        grouped_hidden_states = hidden_states.new_zeros((self.num_experts, max_tokens_per_expert, hidden_states.shape[-1]))
-        grouped_hidden_states[sorted_experts, positions_in_expert] = sorted_hidden_states
+            grouped_hidden_states = hidden_states.new_zeros((self.num_experts, max_tokens_per_expert, hidden_states.shape[-1]))
+            grouped_hidden_states[sorted_experts, positions_in_expert] = sorted_hidden_states
 
-        gate_up = torch.bmm(grouped_hidden_states, gate_up_weight.transpose(1, 2))
-        gate, up = gate_up.chunk(2, dim=-1)
-        grouped_expert_output = torch.bmm(F.silu(gate) * up, down_weight.transpose(1, 2))
-        expert_output = grouped_expert_output[sorted_experts, positions_in_expert]
-        expert_output = expert_output * sorted_weights[:, None]
-        final_hidden_states.index_add_(0, sorted_token_idx, expert_output.to(hidden_states.dtype))
+        with record_moe_profile_phase("gate_up_gemm"):
+            gate_up = torch.bmm(grouped_hidden_states, gate_up_weight.transpose(1, 2))
+        with record_moe_profile_phase("activation"):
+            gate, up = gate_up.chunk(2, dim=-1)
+            activated = F.silu(gate) * up
+        with record_moe_profile_phase("down_gemm"):
+            grouped_expert_output = torch.bmm(activated, down_weight.transpose(1, 2))
+        with record_moe_profile_phase("combine"):
+            expert_output = grouped_expert_output[sorted_experts, positions_in_expert]
+            expert_output = expert_output * sorted_weights[:, None]
+            final_hidden_states.index_add_(0, sorted_token_idx, expert_output.to(hidden_states.dtype))
         return final_hidden_states
 
 
@@ -422,40 +436,45 @@ class SparseMoEExpertParallel(nn.Module):
         if num_tokens == 0:
             return final_hidden_states
 
-        top_k = selected_experts.shape[-1]
-        flat_experts = selected_experts.reshape(-1)
-        flat_weights = routing_weights.reshape(-1)
-        flat_token_idx = torch.arange(num_tokens, device=hidden_states.device).repeat_interleave(top_k)
+        with record_moe_profile_phase("ep_dispatch_prepare"):
+            top_k = selected_experts.shape[-1]
+            flat_experts = selected_experts.reshape(-1)
+            flat_weights = routing_weights.reshape(-1)
+            flat_token_idx = torch.arange(num_tokens, device=hidden_states.device).repeat_interleave(top_k)
 
-        dest_ranks = torch.div(flat_experts, self.experts_per_rank, rounding_mode="floor")
-        local_experts = flat_experts - dest_ranks * self.experts_per_rank
-        sorted_dest_ranks, sort_idx = torch.sort(dest_ranks, stable=True)
-        sorted_token_idx = flat_token_idx.index_select(0, sort_idx)
-        sorted_local_experts = local_experts.index_select(0, sort_idx)
-        sorted_weights = flat_weights.index_select(0, sort_idx)
-        sorted_global_experts = flat_experts.index_select(0, sort_idx)
-        dispatch_hidden = hidden_states.index_select(0, sorted_token_idx)
+            dest_ranks = torch.div(flat_experts, self.experts_per_rank, rounding_mode="floor")
+            local_experts = flat_experts - dest_ranks * self.experts_per_rank
+            sorted_dest_ranks, sort_idx = torch.sort(dest_ranks, stable=True)
+            sorted_token_idx = flat_token_idx.index_select(0, sort_idx)
+            sorted_local_experts = local_experts.index_select(0, sort_idx)
+            sorted_weights = flat_weights.index_select(0, sort_idx)
+            sorted_global_experts = flat_experts.index_select(0, sort_idx)
+            dispatch_hidden = hidden_states.index_select(0, sorted_token_idx)
 
-        send_counts = torch.bincount(sorted_dest_ranks, minlength=self.ep_size).to(torch.int64)
-        recv_counts = torch.empty_like(send_counts)
-        dist.all_to_all_single(recv_counts, send_counts)
+            send_counts = torch.bincount(sorted_dest_ranks, minlength=self.ep_size).to(torch.int64)
+            recv_counts = torch.empty_like(send_counts)
+            dist.all_to_all_single(recv_counts, send_counts)
 
-        received_hidden = self._all_to_all_tensor(dispatch_hidden, send_counts, recv_counts)
-        received_local_experts = self._all_to_all_tensor(sorted_local_experts[:, None], send_counts, recv_counts).reshape(-1)
+        with record_moe_profile_phase("ep_all_to_all_dispatch"):
+            received_hidden = self._all_to_all_tensor(dispatch_hidden, send_counts, recv_counts)
+            received_local_experts = self._all_to_all_tensor(sorted_local_experts[:, None], send_counts, recv_counts).reshape(-1)
 
-        local_output = self.local_experts(
-            received_hidden,
-            received_local_experts[:, None],
-            torch.ones((received_hidden.shape[0], 1), device=received_hidden.device, dtype=received_hidden.dtype),
-            torch.zeros_like(received_hidden),
-        )
+        with record_moe_profile_phase("ep_local_experts"):
+            local_output = self.local_experts(
+                received_hidden,
+                received_local_experts[:, None],
+                torch.ones((received_hidden.shape[0], 1), device=received_hidden.device, dtype=received_hidden.dtype),
+                torch.zeros_like(received_hidden),
+            )
 
-        returned_output = self._all_to_all_tensor(local_output, recv_counts, send_counts)
-        returned_output = returned_output * sorted_weights[:, None]
-        _, combine_idx = torch.sort(sorted_global_experts, stable=True)
-        combine_token_idx = sorted_token_idx.index_select(0, combine_idx)
-        combine_output = returned_output.index_select(0, combine_idx)
-        final_hidden_states.index_add_(0, combine_token_idx, combine_output.to(hidden_states.dtype))
+        with record_moe_profile_phase("ep_all_to_all_combine"):
+            returned_output = self._all_to_all_tensor(local_output, recv_counts, send_counts)
+        with record_moe_profile_phase("ep_combine"):
+            returned_output = returned_output * sorted_weights[:, None]
+            _, combine_idx = torch.sort(sorted_global_experts, stable=True)
+            combine_token_idx = sorted_token_idx.index_select(0, combine_idx)
+            combine_output = returned_output.index_select(0, combine_idx)
+            final_hidden_states.index_add_(0, combine_token_idx, combine_output.to(hidden_states.dtype))
         return final_hidden_states
 
 
@@ -582,12 +601,13 @@ class SparseMoESwiGLU(nn.Module):
         original_shape = x.shape
         hidden_states = x.reshape(-1, self.hidden_size)
 
-        router_logits = self.gate(hidden_states)
-        routing_probs = F.softmax(router_logits, dim=-1, dtype=torch.float32)
-        routing_weights, selected_experts = torch.topk(routing_probs, self.top_k, dim=-1)
-        if self.norm_topk_prob:
-            routing_weights = routing_weights / routing_weights.sum(dim=-1, keepdim=True).clamp_min(1e-12)
-        routing_weights = routing_weights.to(hidden_states.dtype)
+        with record_moe_profile_phase("router"):
+            router_logits = self.gate(hidden_states)
+            routing_probs = F.softmax(router_logits, dim=-1, dtype=torch.float32)
+            routing_weights, selected_experts = torch.topk(routing_probs, self.top_k, dim=-1)
+            if self.norm_topk_prob:
+                routing_weights = routing_weights / routing_weights.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+            routing_weights = routing_weights.to(hidden_states.dtype)
 
         final_hidden_states = self.experts(
             hidden_states,
@@ -604,10 +624,11 @@ class SparseMoESwiGLU(nn.Module):
                 aux_routing_probs = aux_routing_probs[:valid_tokens]
                 aux_selected_experts = aux_selected_experts[:valid_tokens]
 
-            aux_loss = load_balancing_loss_func(aux_routing_probs, aux_selected_experts, self.num_experts)
-            moe_context.setdefault("aux_losses", []).append(aux_loss)
-            with torch.no_grad():
-                expert_counts = torch.bincount(aux_selected_experts.reshape(-1), minlength=self.num_experts).to(torch.float32)
-                moe_context.setdefault("expert_counts", []).append(expert_counts)
+            with record_moe_profile_phase("aux_metrics"):
+                aux_loss = load_balancing_loss_func(aux_routing_probs, aux_selected_experts, self.num_experts)
+                moe_context.setdefault("aux_losses", []).append(aux_loss)
+                with torch.no_grad():
+                    expert_counts = torch.bincount(aux_selected_experts.reshape(-1), minlength=self.num_experts).to(torch.float32)
+                    moe_context.setdefault("expert_counts", []).append(expert_counts)
 
         return final_hidden_states.reshape(original_shape)

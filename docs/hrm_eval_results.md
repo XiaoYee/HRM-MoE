@@ -374,6 +374,67 @@ fp32 softmax、改变聚合语义或放宽精度来换速度。
   index_add，以及 Triton backward 的 grad-input/wgrad 时间；然后只对被证明占比高的
   环节做 kernel 或 dispatch 优化。
 
+### 2026-06-05 00:00 HKT GitHub 调研与 MoE profiling
+
+外部实现调研：
+
+- MegaBlocks 的 README 把 Hopper 代 GPU 上的 grouped GEMM 作为当前推荐路径，并强调
+  dMoE/block-sparse reformulation 可以避免 token dropping 仍保持硬件效率。
+  这支持我们继续沿 grouped GEMM / block sparse 方向优化，而不是回到逐 expert loop。
+  参考：https://github.com/databricks/megablocks
+- Tutel 定位为 optimized MoE library，支持 top-k gate、expert 参数跳过普通 allreduce、
+  单机 8 GPU 和多机分布式 MoE。它对当前 HRM 的启发主要是：通信/参数归约语义必须显式
+  隔离，不能让 expert 参数走普通 dense FSDP/allreduce 语义。
+  参考：https://github.com/microsoft/Tutel
+- DeepEP 重点是 Expert Parallel 通信，文档强调 IB/RDMA、虚拟 lane、adaptive routing、
+  以及通信-计算 overlap/SM-free RDMA path 等。它适合后续重新做 EP，但本轮 profile
+  显示当前单机 grouped_triton 的主要问题还在本地 MoE forward，不是 EP 通信。
+  参考：https://github.com/deepseek-ai/DeepEP
+- TorchTitan 代表 PyTorch 原生 FSDP2/多维并行/observability 路线，适合借鉴结构化
+  profiling 和 FSDP2 参数组织；但本仓库当前 MoE `torch.compile` 仍然不稳定，不能照搬
+  compile 默认开启。
+  参考：https://github.com/pytorch/torchtitan
+
+新增 instrumentation：
+
+- 新增 `models/moe_profile.py`，只有 `HRM_MOE_PROFILE=1` 时才插 CUDA event 并同步；
+  默认训练不受影响。
+- `pretrain.py` 在 `forward_done` 和 `backward_done` 后分别打印
+  `[MoEProfile] forward/backward ...`，便于和 `[TrainProfile]` 对齐。
+- `models/layers.py` 拆分 router、dispatch、gate_up_gemm、activation、
+  down_gemm、combine、aux_metrics；EP 路径拆分 dispatch/all_to_all/local_experts/combine。
+- Triton/CUTLASS grouped GEMM 的自定义 autograd backward 拆分
+  `grad_input_gemm` 和 `grad_weight_gemm`。
+
+验证：
+
+| 时间 | Job/命令 | 结果 | 结论 |
+| --- | --- | --- | --- |
+| 23:49 HKT | `python scripts/test_moe_shard_equivalence.py` | passed | profiling 默认关闭时不改变本地等价。 |
+| 23:51 HKT | `hrm-moe-profile-gate-06042349` | passed | profiling/导入重构后 CUDA/bf16 等价仍通过。 |
+| 23:57 HKT | `hrm-moe-tokenidx-eq-06042356` | passed | token index 临时优化数值等价，但需性能 smoke 决定是否采用。 |
+
+MoE profile 结果，当前最佳 Triton 配置，`HRM_MOE_PROFILE=1`，第 2 个有效 step：
+
+| Job | forward | MoE forward breakdown | backward | MoE backward breakdown | 结论 |
+| --- | ---: | --- | ---: | --- | --- |
+| `hrm-moe64x8-triton-sm16-moeprof-06042345` | 0.407s | total 0.156s；router 0.012s、dispatch 0.032s、gate_up 0.046s、activation 0.006s、down 0.034s、combine 0.019s、aux 0.006s | 0.085s | 未拆 backward | forward 不是单个大 kernel，而是 dispatch+combine+两次 GEMM 的组合开销。 |
+| `hrm-moe64x8-triton-sm16-bwprof-06042351` | 0.348s | total 0.155s；router 0.012s、dispatch 0.032s、gate_up 0.045s、activation 0.006s、down 0.034s、combine 0.019s、aux 0.006s | 0.119s | total 0.037s；grad_input 0.020s、wgrad 0.017s | backward grouped GEMM 不是最大问题；继续优化应优先看 forward dispatch/combine 和 forward grouped GEMM。 |
+
+负优化：
+
+| 时间 | Job | 改动 | 结果 | 处理 |
+| --- | --- | --- | --- | --- |
+| 23:57 HKT | `hrm-moe64x8-triton-sm16-tokenidx-06042357` | 用 `sort_idx // top_k` 替代 `arange(...).repeat_interleave(top_k)` 再 `index_select` | 第 2 step forward 0.277s、backward 0.098s、optimizer 0.048s、核心约 0.424s，慢于当前最佳 0.389s | 已回退；这类微优化必须以同口径 smoke 为准。 |
+
+后续优先级：
+
+- 保留 `HRM_MOE_PROFILE=1` 作为诊断开关，默认关闭。
+- 当前最值得继续尝试的是减少 forward dispatch/combine 开销，或参考 MegaBlocks 的
+  block-sparse/dropless 思路，把 expert-sorted dispatch、GEMM 和 combine 做更强融合。
+- EP/DeepEP 路线仍有价值，但要先修复当前 grouped_ep 第二步 backward stall，并增加
+  多步训练 gate；不能只凭 all-to-all 等价脚本通过就采用。
+
 ## 评测设置
 
 | 项目 | 值 |

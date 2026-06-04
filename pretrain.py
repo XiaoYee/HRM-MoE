@@ -24,6 +24,7 @@ import pydantic
 from omegaconf import DictConfig, OmegaConf
 
 from models.layers import Carry
+from models.moe_profile import pop_moe_profile, reset_moe_profile
 from models.common import wrap_tensor
 from models.transformer import TransformerBlock
 from models.adam_atan2 import AdamATan2
@@ -239,12 +240,44 @@ def profile_mark(enabled: bool, message: str, start: Optional[float] = None) -> 
     return now
 
 
+def profile_moe_breakdown(enabled: bool, label: str) -> None:
+    profile = pop_moe_profile()
+    if not enabled or not profile:
+        return
+
+    preferred_order = [
+        "router",
+        "dispatch",
+        "gate_up_gemm",
+        "activation",
+        "down_gemm",
+        "combine",
+        "aux_metrics",
+        "grad_output_contiguous",
+        "grad_input_gemm",
+        "grad_weight_gemm",
+        "ep_dispatch_prepare",
+        "ep_all_to_all_dispatch",
+        "ep_local_experts",
+        "ep_all_to_all_combine",
+        "ep_combine",
+    ]
+    ordered_keys = [key for key in preferred_order if key in profile]
+    ordered_keys.extend(sorted(key for key in profile if key not in set(preferred_order)))
+    details = " ".join(f"{key}={profile[key]:.3f}s" for key in ordered_keys)
+    total = sum(profile.values())
+    print(f"[MoEProfile] {label} total={total:.3f}s {details}", flush=True)
+
+
 def train_batch_eager(train_state: TrainState, batch: dict[str, Tensor], profile: bool = False, **kwargs):
+    reset_moe_profile()
     mark = profile_mark(profile, "forward_start")
     train_state.carry, loss, metrics = train_state.model(batch=batch, carry=train_state.carry, **kwargs)
     mark = profile_mark(profile, "forward_done", mark)
+    profile_moe_breakdown(profile, "forward")
     loss.backward()
     mark = profile_mark(profile, "backward_done", mark)
+    profile_moe_breakdown(profile, "backward")
     train_state.optim.step()
     mark = profile_mark(profile, "optim_step_done", mark)
     train_state.optim.zero_grad()

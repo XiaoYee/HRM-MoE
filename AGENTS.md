@@ -407,6 +407,22 @@ python scripts/prepare_sft_data.py \
 - Keep the MoE dispatch `torch.sort(..., stable=True)` unless a new same-shape
   smoke proves otherwise. A default-sort experiment passed numerical
   equivalence but slowed the Triton path, so it was reverted.
+- Use `HRM_MOE_PROFILE=1` only for diagnosis. It inserts CUDA events and
+  synchronizes phase boundaries, so the absolute step time is slower than a
+  normal smoke; use it for breakdown, not headline speed. The current Triton
+  64x8 profile shows forward dispatch/combine and forward grouped GEMMs are
+  more promising than backward grouped GEMM. Backward `grad_input_gemm` and
+  `grad_weight_gemm` were small in the measured steady step.
+- Do not replace `flat_token_idx = arange(...).repeat_interleave(top_k)` with
+  `sort_idx // top_k` just because it is algebraically equivalent. That
+  token-index experiment passed local and CUDA/bfloat16 equivalence but slowed
+  the same-shape Triton smoke, so it was reverted.
+- GitHub directions for future MoE speed work: MegaBlocks supports continuing
+  grouped-GEMM/block-sparse work; Tutel and DeepEP are more relevant for
+  expert-parallel communication and parameter/communication isolation; use
+  TorchTitan mainly as a reference for FSDP2 organization and observability.
+  Any imported idea still needs HRM local equivalence, CUDA/bfloat16 gate, and
+  same-shape training smoke before adoption.
 
 ## Local Validation
 
