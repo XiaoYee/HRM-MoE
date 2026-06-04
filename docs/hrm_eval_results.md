@@ -1,55 +1,76 @@
-# HRM Pretrain Evaluation Results
+# HRM 预训练实验与评测结果
 
-Last updated: 2026-06-04 17:33 HKT.
+最后更新：2026-06-04 18:05 HKT。
 
-## Experiment
+## 16 卡基线实验
 
-Checkpoint root:
+Checkpoint 根目录：
 `/mnt/shared-storage-user/quxiaoye/HRM-Text/checkpoints/hrm-pretrain-16g-xl-persistent-0602115537`
 
-Training data:
+训练数据：
 `/mnt/shared-storage-user/quxiaoye/HRM-Text/data_sampled_bpe_65k_e4_ctx4097`
 
-Training run:
+训练任务：
 
-| Item | Value |
+| 项目 | 值 |
 | --- | --- |
 | Job | `hrm-pretrain-16g-xl-persistent-0602115537` |
-| Status | succeeded |
-| GPUs | 16 H200 GPUs, 2 replicas x 8 GPUs |
+| 状态 | succeeded |
+| GPUs | 16 张 H200，2 replicas x 8 GPUs |
 | Config | `cfg_pretrain`, XL |
-| Training start | 2026-06-02 11:56:44 HKT |
-| Training end | 2026-06-04 08:32:30 HKT |
-| Wall time | 44h 35m 46s |
-| Stable epoch time | about 11h 40m per epoch |
+| 开始时间 | 2026-06-02 11:56:44 HKT |
+| 结束时间 | 2026-06-04 08:32:30 HKT |
+| 总耗时 | 44h 35m 46s |
+| 稳态 epoch 耗时 | 约 11h 40m / epoch |
 
-Checkpoint completion times:
+Checkpoint 完成时间：
 
-| Epoch | Checkpoint time |
+| Epoch | Checkpoint 时间 |
 | ---: | --- |
 | 1 | 2026-06-02 21:32:43 HKT |
 | 2 | 2026-06-03 09:13:47 HKT |
 | 3 | 2026-06-03 20:53:33 HKT |
 | 4 | 2026-06-04 08:32:29 HKT |
 
-## Evaluation Setup
+## 后续训练尝试
 
-| Item | Value |
+除非特别说明，以下任务使用同一份持久化 4-epoch sampled 数据：
+`/mnt/shared-storage-user/quxiaoye/HRM-Text/data_sampled_bpe_65k_e4_ctx4097`.
+
+| 时间 | Job | 资源 | 超参 | 状态 | 记录 |
+| --- | --- | --- | --- | --- | --- |
+| 2026-06-04 17:48 HKT | `hrm-data-sample-e5-ctx4097-06041755` | CPU data-prep rjob | `epochs=5`, `context_size=4097` | stopped | 为测试 5 epoch 采样启动，随后实验目标改回 4 epoch 后取消。该任务产生了 root-owned 的半成品 `data_sampled_bpe_65k_e5_ctx4097/tokens.npy`；清理任务 `hrm-clean-e5-partial-tokens-06041759` 已成功删除。 |
+| 2026-06-04 17:53 HKT | `hrm-pretrain-32g-xl-e4-gbs196k-06041753` | 32 张 H200，4 replicas x 8 GPUs | XL, `epochs=4`, `global_batch_size=196608`, `lr=2.2e-4`, `checkpoint_interval=1`, `WANDB_MODE=online` | failed | 已进入 `World Size 32` 并开始 epoch 1，但 rank 0 在 `wandb.init` 处因 `No API key configured` 失败。后续其他 rank 的 TCPStore/NCCL broken pipe 是 rank 0 退出后的连锁反应，不是首因。该 job 已停止，checkpoint 路径下没有留下 checkpoint 文件。 |
+| 2026-06-04 18:00 HKT | `hrm-pre32g-xl-e4-off0604` | 32 张 H200，4 replicas x 8 GPUs | XL, `epochs=4`, `global_batch_size=196608`, `lr=2.2e-4`, `checkpoint_interval=1`, `WANDB_MODE=offline` | running | 使用相同 32 卡可比设置重新提交，但改为 W&B offline，避免依赖 API key。2026-06-04 18:04 HKT 确认 4 个 replica 均为 RUNNING；18:05 HKT 日志确认已进入 `World Size 32` 的 epoch 1。Checkpoint 将写入 `/mnt/shared-storage-user/quxiaoye/HRM-Text/checkpoints/hrm-pre32g-xl-e4-off0604`。 |
+
+操作记录和经验：
+
+- 如果目标是和 16 卡基线比较 wall-clock speedup，同时不改变 optimizer scale
+  和 step 数，32 卡对照实验应保持 `global_batch_size=196608`。
+- 如果不能确认 W&B credential 已在 rjob 环境中配置，训练任务使用
+  `WANDB_MODE=offline`；否则 rank 0 会在 `wandb.init` 处失败，训练还没真正
+  开始就退出。
+- rjob 名字要短。`hrm-pretrain-32g-xl-e4-gbs196k-offline-06041800` 的
+  dry-run 在提交前失败，因为生成的 task label 超过 Kubernetes 63 字符限制。
+
+## 评测设置
+
+| 项目 | 值 |
 | --- | --- |
-| Resources | 8 GPUs per eval job, fanout sharding |
+| 资源 | 每个 eval job 8 GPUs，fanout sharding |
 | Fanout workers | 8 |
-| Batch size | 16 for standard and MMLU-Pro evals |
-| Data cache | `eval_data_hf_parquet` |
+| Batch size | standard 和 MMLU-Pro eval 使用 16 |
+| 数据缓存 | `eval_data_hf_parquet` |
 | Standard config | `evaluation/config/hrm_benchmarking.yaml` |
 | MMLU-Pro config | `evaluation/config/hrm_mmlu_pro_benchmarking.yaml` |
 | AIME config | `evaluation/config/hrm_maj_vote_benchmarking.yaml` |
 
-Standard config benchmarks:
+Standard config 包含：
 GSM8k, MATH, DROP, MMLU, ARC, HellaSwag, Winogrande, BoolQ.
 
-## Run Index
+## 评测任务索引
 
-| Eval set | Epoch | Job | Status | Summary |
+| Eval set | Epoch | Job | 状态 | Summary |
 | --- | ---: | --- | --- | --- |
 | Standard | 1 | `hrm-eval-e1-localdata-r4-0603` | succeeded | `rjob_logs/hrm-eval-fanout_0_0_bench_20260603_025332/summary.json` |
 | Standard | 2 | `hrm-eval-e2-localdata-0603` | succeeded | `rjob_logs/hrm-eval-fanout_0_0_bench_20260603_032940/summary.json` |
@@ -64,9 +85,9 @@ GSM8k, MATH, DROP, MMLU, ARC, HellaSwag, Winogrande, BoolQ.
 | AIME25 | 3 | `hrm-eval-e3-aime25-seq-0604` | succeeded | `rjob_logs/hrm-eval-fanout_0_0_bench_20260604_065156/summary.json` |
 | AIME25 | 4 | `hrm-eval-e4-aime25-seq-0604` | succeeded | `rjob_logs/hrm-eval-fanout_0_0_bench_20260604_070045/summary.json` |
 
-## Main Metrics
+## 主指标
 
-Values are shown as percentages. DROP reports exact match and F1.
+数值均为百分比。DROP 同时记录 exact match 和 F1。
 
 | Benchmark | Metric | Epoch 1 | Epoch 2 | Epoch 3 | Epoch 4 |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -81,9 +102,9 @@ Values are shown as percentages. DROP reports exact match and F1.
 | BoolQ | acc | 74.28 | 84.19 | 85.57 | 86.73 |
 | MMLU-Pro | acc | 19.57 | 27.06 | 30.86 | 33.11 |
 
-## Invalid Rates
+## Invalid Rate
 
-Values are shown as percentages.
+数值均为百分比。
 
 | Benchmark | Epoch 1 | Epoch 2 | Epoch 3 | Epoch 4 |
 | --- | ---: | ---: | ---: | ---: |
@@ -96,11 +117,11 @@ Values are shown as percentages.
 | BoolQ | 0.00 | 0.00 | 0.00 | 0.00 |
 | MMLU-Pro | 5.05 | 2.48 | 3.87 | 2.84 |
 
-DROP does not report an invalid rate in the current summary.
+当前 summary 中 DROP 没有 invalid rate。
 
 ## AIME25 Majority Voting
 
-Values are shown as percentages.
+数值均为百分比。
 
 | Metric | Epoch 1 | Epoch 2 | Epoch 3 | Epoch 4 |
 | --- | ---: | ---: | ---: | ---: |
@@ -111,14 +132,14 @@ Values are shown as percentages.
 | pass@10 | 7.13 | 18.67 | 18.29 | 22.01 |
 | pass@100 | 29.17 | 44.16 | 44.16 | 41.58 |
 
-## Standard Benchmark Sample Counts
+## 标准 Benchmark 样本数
 
 | Benchmark | n |
 | --- | ---: |
 | GSM8k | 1,319 |
 | MATH | 5,000 |
 | DROP | 9,536 |
-| MMLU | 57 aggregated subjects |
+| MMLU | 57 个聚合 subject |
 | ARC | 1,172 |
 | HellaSwag | 10,042 |
 | Winogrande | 1,267 |
@@ -126,16 +147,16 @@ Values are shown as percentages.
 | MMLU-Pro | 12,032 |
 | AIME25 | 30 |
 
-For MMLU, the top-level summary `n` is the aggregated subject count; per-subject
-sample counts are available in the raw benchmark logs.
+对于 MMLU，顶层 summary 的 `n` 是聚合后的 subject 数；每个 subject 的样本数
+可以在原始 benchmark 日志里查。
 
-## Notes
+## 结论和备注
 
-- The standard benchmark suite improves monotonically from epoch 1 to epoch 4 on
-  all primary metrics listed above.
-- MMLU-Pro improves from 19.57 percent at epoch 1 to 33.11 percent at epoch 4.
-- AIME25 epoch 4 has the best maj_pass@1, pass@1, and pass@10. Epoch 3 has the
-  best maj_pass@100/pass@100, so the high-sample majority-vote metric is not
-  monotonic across epochs.
-- The training data is the sampled HRM/Data IO instruction-response PrefixLM
-  dataset, not a one-off dataset built from the evaluation test sets.
+- 标准 benchmark suite 在上述所有主指标上，从 epoch 1 到 epoch 4 单调提升。
+- MMLU-Pro 从 epoch 1 的 19.57% 提升到 epoch 4 的 33.11%。
+- AIME25 上，epoch 4 的 `maj_pass@1`、`pass@1` 和 `pass@10` 最好；epoch 3
+  的 `maj_pass@100` / `pass@100` 最好，因此高采样 majority-vote 指标并不
+  随 epoch 单调变化。
+- 当前训练数据是 sampled HRM/Data IO instruction-response PrefixLM 数据，不是
+  针对评测测试集临时构造的一次性数据。
+- 后续所有训练、评测、失败尝试、清理动作和分析结论都用中文追加到本文档。
