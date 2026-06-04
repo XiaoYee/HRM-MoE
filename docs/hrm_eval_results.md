@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-04 19:31 HKT。
+最后更新：2026-06-04 19:48 HKT。
 
 ## 16 卡基线实验
 
@@ -110,6 +110,8 @@ Checkpoint 完成时间：
 | 2026-06-04 18:27 HKT | 小 MoE 前后向脚本 | 未在登录环境运行 | 登录环境缺 `einops`；按仓库约定，真实训练环境以后续 rjob 结果为准。 |
 | 2026-06-04 19:21 HKT | `python scripts/test_moe_shard_equivalence.py` | passed | 本地补用户态 `einops` 并在测试脚本中 stub FlashAttention；比较 origin/shard 的 forward、aux loss、expert counts、输入梯度、router 梯度和每个 expert 权重梯度，均通过。 |
 | 2026-06-04 19:21 HKT | `python -m py_compile ...` | passed | 覆盖 shard/FSDP 修改后的 `models/*.py`、`pretrain.py` 和等价测试脚本。 |
+| 2026-06-04 19:35 HKT | `python -m py_compile ...` | passed | dense 对照前复查 MoE 相关 Python 文件语法。 |
+| 2026-06-04 19:35 HKT | `python scripts/test_moe_shard_equivalence.py` | passed | 再次确认 origin/shard 的前向、aux loss、expert counts、输入梯度、router 梯度和 expert 梯度等价。 |
 
 Smoke 任务记录：
 
@@ -127,6 +129,90 @@ Smoke 任务记录：
 | 2026-06-04 19:22 HKT | `hrm-moe64x8-shard-bp2-gb8192-06041922` | 8 x H200 | shard MoE, `global_batch_size=8192`, `bp_steps=2` | failed | FSDP2 不能直接 `fully_shard(ModuleList)`，报 `does not support containers that do not implement forward`。修复：引入有 `forward()` 的 `SparseMoEExpertCollection` 包住 expert shards。 |
 | 2026-06-04 19:25 HKT | `hrm-moe64x8-shard-bp2-gb8192-06041925` | 8 x H200 | shard MoE, `global_batch_size=8192`, `bp_steps=2`, `log_interval=999` | succeeded | shard + expert FSDP 包装完整跑通并自然退出：forward 3.887s、backward 2.851s、optimizer 0.230s、zero-grad 0.002s，打印 `Reached max_steps=1`。参数量 5,413,797,888。 |
 | 2026-06-04 19:27 HKT | `hrm-moe64x8-shard-reduce-bp2-gb8192-06041927` | 8 x H200 | shard MoE, `global_batch_size=8192`, `bp_steps=2`, `log_interval=1` | succeeded | 验证 metrics reduce 修复：forward 3.740s、backward 2.513s、optimizer 0.228s、zero-grad 0.002s、`reduce_metrics_done` 0.006s、`wandb_log_done` 0.002s，完整自然退出。 |
+
+### 2026-06-04 19:34 HKT dense 对照与 MoE shard 性能对比
+
+对照目标：回答“当前加速版 MoE 比 dense 慢多少”，并确认是否还有 infra
+加速空间。所有任务都在同一 worktree、同一 8 x H200 节点、同一持久化训练数据、
+同一 smoke 口径下运行：`global_batch_size=8192`、`epochs=1`、`max_steps=1`、
+`log_interval=1`、`compile_train_batch=false`、`profile_train_batch=true`、
+`lr_warmup_steps=1`、`+arch.bp_min_steps=2 arch.bp_max_steps=2`。
+
+| 模型 | Job | 状态 | 参数量 | forward | backward | optimizer | zero-grad | reduce metrics | wandb log | 进度条单步耗时 |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Dense XL | `hrm-dense-xl-bp2-gb8192-06041934` | succeeded | 1,182,793,728 | 0.497s | 0.102s | 0.084s | 0.001s | 0.050s | 0.001s | 4.97s |
+| MoE XL 64x8 shard | `hrm-moe64x8-shard-reduce-bp2-gb8192-06041927` | succeeded | 5,413,797,888 | 3.740s | 2.513s | 0.228s | 0.002s | 0.006s | 0.002s | 10.08s |
+
+同口径慢速比例：
+
+| 口径 | Dense | MoE shard | MoE / Dense |
+| --- | ---: | ---: | ---: |
+| forward | 0.497s | 3.740s | 7.53x |
+| backward | 0.102s | 2.513s | 24.64x |
+| optimizer | 0.084s | 0.228s | 2.71x |
+| 核心训练段，forward + backward + optimizer + zero-grad | 0.684s | 6.483s | 9.48x |
+| 加上 metrics reduce 和 wandb log | 0.735s | 6.491s | 8.83x |
+| 进度条单步 wall time | 4.97s | 10.08s | 2.03x |
+
+补充口径：尝试用 `max_steps=3` 做短平均时，`epochs=1 max_steps=3`
+只产生 1 个有效训练 batch，不适合作为 3-step 结果。改用
+`epochs=3 max_steps=3 checkpoint_interval=999` 后，dense 和 MoE shard 都实际
+产生 2 个有效训练 batch，第三个 epoch 没有有效 step；因此下面只作为补充
+平均值，不替代上面的同配置 single-step headline。
+
+| 模型 | Job | 有效 steps | forward 平均 | backward 平均 | optimizer 平均 | 核心训练段平均 | 加上 metrics/log 平均 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Dense XL | `hrm-dense-xl-bp2-gb8192-e3s3-06041941` | 2 | 0.614s | 0.076s | 0.063s | 0.754s | 0.756s |
+| MoE XL 64x8 shard | `hrm-moe64x8-shard-bp2-gb8192-e3s3-06041943` | 2 | 2.546s | 2.015s | 0.194s | 4.758s | 4.766s |
+
+补充平均慢速比例：
+
+| 口径 | MoE / Dense |
+| --- | ---: |
+| forward | 4.15x |
+| backward | 26.51x |
+| optimizer | 3.08x |
+| 核心训练段，forward + backward + optimizer + zero-grad | 6.31x |
+| 加上 metrics reduce 和 wandb log | 6.30x |
+
+结论：
+
+- 当前 shard/FSDP 加速版 MoE 在核心训练段比 Dense XL 慢约 9.5x；如果看这个
+  one-step smoke 的进度条 wall time，则慢约 2.0x。后者被 dataloader、启动后
+  首步调度、进度条刷新等固定开销稀释，判断 kernel/infra 瓶颈时应优先看
+  `TrainProfile` 的核心训练段。
+- 有效 2-step 补充平均下，MoE shard 核心训练段比 Dense XL 慢约 6.3x。这个
+  数值比 single-step 小，主要因为第二个有效 batch 明显更短；要得到正式稳态吞吐，
+  后续应专门准备可重复多 step 的 smoke 数据切片或使用更长训练窗口。
+- shard 版已经明显改善 FSDP/optimizer 开销。origin MoE 的一次有效 step 中
+  optimizer 为 0.940s；shard + expert FSDP 后 optimizer 为 0.228s，约 4.1x
+  加速。说明“把 64 个 expert 组织成 8 个 expert shard，再让 FSDP 包
+  `layer.mlp.experts`”这条路是有效的。
+- 大头仍然是 expert compute 本身：当前 `SparseMoEExpertShard.forward` 仍然在
+  每个 MoE 层里按 expert 循环，执行 `torch.where`、小 batch `F.linear`、
+  routing weight 乘法和 `index_add_`。shard 只是降低 FSDP 对象数量和优化器
+  开销，还没有实现真正的 grouped GEMM。
+
+当前 infra 加速空间：
+
+- 第一优先级是 grouped expert compute。把现在每层 64 次 expert 查找/小 GEMM
+  的路径，改成按 `selected_experts` 排序或分桶，一次性构造 grouped GEMM 的
+  输入，再按原 token/top-k 顺序 scatter 回来。参考 pith-train 的 Qwen3 MoE
+  grouped expert 思路，但落地到 HRM 时必须保持 router/top-k 语义完全不变。
+- 第二优先级是减少 `torch.where` 和 `index_add_` 的次数。当前每个 expert 都
+  扫一遍 `selected_experts`，这会在 64 experts、top-k=8 时放大 Python 调度和
+  GPU 小 kernel 开销。更合理的是一次 sort/argsort 生成 expert 分段，再复用分段
+  做 gate/up/down 和 scatter。
+- 第三优先级是继续保留 expert collection 的 FSDP 包装，但让 collection 内部
+  的参数布局服务 grouped GEMM。现有 `moe_expert_in_one_shard=8` 对 optimizer
+  已经有收益；后续可以评估每 shard 8/16 experts 的吞吐和显存折中。
+- Expert Parallel / all-to-all 是更大的架构改动，单机 8 卡场景下未必是首选；
+  只有当 grouped GEMM 后仍被单卡 expert 参数/激活占用卡住，才值得引入 EP。
+- 精度守门必须保留：router softmax 使用 fp32；top-k routing weights 归一化后
+  再 cast 回 hidden dtype；origin/shard/grouped 任意新实现都要通过 forward、
+  aux loss、expert counts、输入梯度、router 梯度和 expert 梯度等价测试，再跑
+  8 卡 smoke。MoE 的精度风险主要来自路由顺序、scatter 聚合顺序和 dtype 提前
+  cast，不能只用 loss 能下降来判断正确。
 
 经验：
 
