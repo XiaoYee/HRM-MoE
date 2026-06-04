@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-04 18:34 HKT。
+最后更新：2026-06-04 18:45 HKT。
 
 ## 16 卡基线实验
 
@@ -107,6 +107,8 @@ Smoke 任务记录：
 | --- | --- | --- | --- | --- | --- |
 | 2026-06-04 18:29 HKT | `hrm-moe64x8-smk06041829` | 8 x H200 | `arch_size=XL_moe64x8`, `global_batch_size=32768`, `epochs=1`, `max_steps=2`, `compile_train_batch=false`, `WANDB_MODE=offline` | failed | 未进入模型构建。首因是 Hydra struct 中没有 `max_steps`，普通 override `max_steps=2` 被拒绝；修复方式是在 `cfg_pretrain.yaml` / `cfg_sft.yaml` 中补 `compile_train_batch` 和 `max_steps` 默认项。 |
 | 2026-06-04 18:33 HKT | `hrm-moe64x8-smk2-06041833` | 8 x H200 | `arch_size=XL_moe64x8`, `global_batch_size=32768`, `epochs=1`, `max_steps=2`, `log_interval=1`, `compile_train_batch=false`, `WANDB_MODE=offline` | failed | 仍未进入模型构建。首因是 Hydra struct 中没有 `log_interval`，普通 override `log_interval=1` 被拒绝；修复方式是在 `cfg_pretrain.yaml` / `cfg_sft.yaml` 中补 `log_interval` 默认项。 |
+| 2026-06-04 18:35 HKT | `hrm-moe64x8-smk3-06041835` | 8 x H200 | `arch_size=XL_moe64x8`, `global_batch_size=32768`, `epochs=1`, `max_steps=2`, `log_interval=1`, `compile_train_batch=false`, `WANDB_MODE=offline` | stopped | 已进入 `World Size 8` 的 epoch 1，说明 Hydra、模型构建、FSDP 初始化通过；但每卡 4096 token 的首个 step 超过 5 分钟未完成，先停止，缩小 batch 继续调通链路。 |
+| 2026-06-04 18:42 HKT | `hrm-moe64x8-smk4-06041842` | 8 x H200 | `arch_size=XL_moe64x8`, `global_batch_size=8192`, `epochs=1`, `max_steps=1`, `log_interval=1`, `compile_train_batch=false`, `WANDB_MODE=offline` | failed | 已进入 epoch 1，但在第一个 step 的 `update_lr` 失败：`total_steps=1` 且 `lr_warmup_steps=1` 时 cosine 分支分母为 0；修复方式是让 warmup 分支覆盖 `step <= warmup_steps`，并让 decay 分母至少为 1。 |
 
 经验：
 
@@ -114,6 +116,12 @@ Smoke 任务记录：
   调已有默认字段时，要同步写入 Hydra YAML 默认配置；否则会报
   `Key ... is not in struct`。也可以用 `+key=value` 临时追加，但长期可复用
   参数应进入 YAML。
+- `max_steps` 很小的 smoke 会触发 LR schedule 边界条件；`total_steps <=
+  lr_warmup_steps` 时不能直接用 `total_steps - lr_warmup_steps` 做 cosine
+  分母。
+- 64x8 MoE 的 naive eager expert loop 可以跑到初始化阶段，但每卡 4096 token
+  的首个 step 很慢。调通链路时先用每卡 1024 token 或更小 batch，再考虑
+  grouped GEMM / expert parallel / 更细粒度 FSDP 优化。
 
 ## 评测设置
 

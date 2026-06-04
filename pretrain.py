@@ -194,10 +194,11 @@ def init_train(config: PretrainConfig, rank: int, world_size: int):
 
 def update_lr(config: PretrainConfig, train_state: TrainState) -> float:
     # Linear warmup cosine schedule
-    if train_state.step < config.lr_warmup_steps:
+    if config.lr_warmup_steps > 0 and train_state.step <= config.lr_warmup_steps:
         lr = config.lr * min(1.0, train_state.step / config.lr_warmup_steps)
     else:
-        progress = (train_state.step - config.lr_warmup_steps) / (train_state.total_steps - config.lr_warmup_steps)
+        decay_steps = max(1, train_state.total_steps - config.lr_warmup_steps)
+        progress = min(1.0, max(0.0, (train_state.step - config.lr_warmup_steps) / decay_steps))
         lr = config.lr * (config.lr_min_ratio + max(0.0, (1 - config.lr_min_ratio) * 0.5 * (1.0 + math.cos(math.pi * progress))))
 
     tensor_lr = torch.tensor(lr, dtype=torch.get_default_dtype(), device="cpu")
