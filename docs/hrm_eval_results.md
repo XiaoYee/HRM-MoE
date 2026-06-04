@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-04 18:27 HKT。
+最后更新：2026-06-04 18:32 HKT。
 
 ## 16 卡基线实验
 
@@ -100,6 +100,18 @@ Checkpoint 完成时间：
 | --- | --- | --- | --- |
 | 2026-06-04 18:27 HKT | `python -m py_compile ...` | passed | 覆盖 MoE 修改到的 Python 文件。 |
 | 2026-06-04 18:27 HKT | 小 MoE 前后向脚本 | 未在登录环境运行 | 登录环境缺 `einops`；按仓库约定，真实训练环境以后续 rjob 结果为准。 |
+
+Smoke 任务记录：
+
+| 时间 | Job | 资源 | 参数 | 状态 | 记录 |
+| --- | --- | --- | --- | --- | --- |
+| 2026-06-04 18:29 HKT | `hrm-moe64x8-smk06041829` | 8 x H200 | `arch_size=XL_moe64x8`, `global_batch_size=32768`, `epochs=1`, `max_steps=2`, `compile_train_batch=false`, `WANDB_MODE=offline` | failed | 未进入模型构建。首因是 Hydra struct 中没有 `max_steps`，普通 override `max_steps=2` 被拒绝；修复方式是在 `cfg_pretrain.yaml` / `cfg_sft.yaml` 中补 `compile_train_batch` 和 `max_steps` 默认项。 |
+
+经验：
+
+- 给 `PretrainConfig` 新增顶层字段时，要同步写入 Hydra YAML 默认配置；否则
+  rjob 里用 `key=value` override 会报 `Key ... is not in struct`。也可以用
+  `+key=value` 临时追加，但长期可复用参数应进入 YAML。
 
 ## 评测设置
 

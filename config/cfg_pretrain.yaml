@@ -20,3 +20,6 @@ beta1: 0.9
 beta2: 0.95
 
 ema: 0.9999
+
+compile_train_batch: true
+max_steps: null

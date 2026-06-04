@@ -33,3 +33,6 @@ beta2: 0.95
 # tracking mostly SFT trajectory, and using --use-ema at eval gives a small
 # regularization boost over raw weights.
 ema: 0.999
+
+compile_train_batch: true
+max_steps: null
