@@ -443,6 +443,18 @@ python scripts/prepare_sft_data.py \
   `Required: 327704, Hardware limit: 232448`. Larger block-M exploration needs
   lower-stage configs or OOR-tolerant autotune first, then the normal
   CUDA/bfloat16 equivalence gate.
+- `HRM_MOE_TRITON_BLOCK_M=256` with `num_stages=2` still OORed in
+  `hrm-moe-bm256s2-eq-06050051` (`Required: 262160, Hardware limit: 232448`).
+  `num_stages=1` passed the CUDA/bfloat16 gate
+  (`hrm-moe-bm256s1-eq-06050054`) but the same-shape smoke
+  `hrm-moe64x8-bm256s1-06050056` was slower than the current best
+  (second-step core about 0.469s vs 0.389s). Do not adopt BM256 stage-1 as a
+  default; prefer tuning the BM128 path or narrower grouped-GEMM configs next.
+- When a long rjob is reading one worktree, use a separate git worktree for
+  MoE speed code experiments. The 32-card run `hrm-moe32g-gt06050041` reads
+  `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8`; speed tuning moved to
+  `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8-tune` so code edits do
+  not perturb the running training job.
 
 ## Local Validation
 

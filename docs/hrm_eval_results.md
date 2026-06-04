@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-05 00:48 HKT。
+最后更新：2026-06-05 01:03 HKT。
 
 ## 16 卡基线实验
 
@@ -565,6 +565,39 @@ GitHub/外部实现继续调研：
   autotune 逻辑，并重新从 CUDA/bfloat16 gate 开始。
 - 为避免影响正在运行的 `hrm-moe32g-gt06050041`，后续效率代码改动应在单独
   worktree 中完成，再用独立 rjob 验证。
+
+### 2026-06-05 01:03 HKT 剩余 8 卡 MoE Triton 调参
+
+为了不影响正在运行的 32 卡 MoE 长训，效率代码实验转到独立 worktree：
+`/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8-tune`，分支
+`codex/hrm-moe64x8-tune`。
+
+代码改动：
+
+- 新增 `HRM_MOE_TRITON_NUM_STAGES`，默认仍为 3；只有显式设置时才改变
+  Triton grouped GEMM config。
+- `scripts/rjob_hrm_common.sh` 透传 `moe_triton_num_stages`，方便 gate 和 smoke
+  使用同一参数。
+- 本地验证通过：`py_compile`、`bash -n`、`python scripts/test_moe_shard_equivalence.py`。
+- tune 分支 commit：`4ee2b33 Add Triton num stages tuning knob`。
+
+调参结果：
+
+| 时间 | Job | 参数 | 结果 | 结论 |
+| --- | --- | --- | --- | --- |
+| 00:50 HKT | `hrm-moe-bm256s2-eq-06050051` | `BLOCK_M=256`, `num_stages=2`, autotune, SM16 | failed | 仍然 OOR：shared memory required 262160 > hardware limit 232448，不测速。 |
+| 00:54 HKT | `hrm-moe-bm256s1-eq-06050054` | `BLOCK_M=256`, `num_stages=1`, autotune, SM16 | passed | CUDA/bfloat16 等价通过，可以测速。 |
+| 00:56 HKT | `hrm-moe64x8-bm256s1-06050056` | 同上，8 卡 `max_steps=3` smoke | succeeded | 第 2 个有效 step：forward 0.294s、backward 0.129s、optimizer 0.045s、zero-grad 0.001s，核心约 0.469s。慢于当前最佳 0.389s，不采用。 |
+| 01:03 HKT | `hrm-moe-bm128s2-eq-06050103` | 默认 `BLOCK_M=128`, `num_stages=2`, autotune, SM16 | running | 正在跑 CUDA/bfloat16 gate；通过后才允许性能 smoke。 |
+
+当前判断：
+
+- 32 卡 MoE 长训 `hrm-moe32g-gt06050041` 仍然 `RUNNING`，rank0 进度持续推进，
+  01:02 HKT 已推进到约 `1625/304789`。
+- `BLOCK_M=256` 不是当前的好方向：`num_stages=3/2` OOR，`num_stages=1` 虽然
+  精度过但稳态核心段慢于当前最佳。
+- 下一步优先看默认 `BLOCK_M=128` 的 stage/config 调整，以及更细的
+  `BLOCK_N/BLOCK_K/GROUP_M` autotune；仍然保持“先 gate，后 smoke”的顺序。
 
 ## 评测设置
 
