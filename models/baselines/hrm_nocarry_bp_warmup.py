@@ -64,6 +64,8 @@ class HierarchicalReasoningModel(nn.Module):
         self.bp_max_steps = config.bp_max_steps
 
         self.hidden_size = config.hidden_size
+        self.moe_num_experts = config.moe_num_experts
+        self.moe_router_aux_loss_coef = config.moe_router_aux_loss_coef if self.moe_num_experts > 0 else 0.0
         self.head_hint = self.H_level.core.head_hint  # Hint for LMHead init (inherit from H)
         
         self.zL_init = nn.Buffer(trunc_normal_init_(torch.empty(config.hidden_size, dtype=torch.bfloat16), std=1.0), persistent=True)  # NOTE: hardcoded dtype.

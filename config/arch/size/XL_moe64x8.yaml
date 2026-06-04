@@ -1,0 +1,25 @@
+# Backbone config
+n_layers: 32
+
+hidden_size: 1536
+num_heads: 12  # head size 128, min(2, hidden_size // 128)
+expansion: 4
+
+norm_type: pre  # TODO: Try different type of norms. Note that learning rate is dependent of norm type and init scale.
+norm_eps: 1e-6
+
+rope_theta: 10000.0
+pos_emb_type: rope
+
+# Simple Lecun Normal works better than Megatron init.
+# NOTE: Maybe larger init increases non-residual contribution, and layers are more effective?
+init_type: lecun_normal
+
+# Qwen-style sparse MoE FFN.
+# Each dense SwiGLU FFN has intermediate_size=4096 for XL. With top_k=8 and
+# moe_intermediate_size=512, active expert FFN width matches the dense FFN.
+moe_num_experts: 64
+moe_top_k: 8
+moe_intermediate_size: 512
+moe_norm_topk_prob: true
+moe_router_aux_loss_coef: 0.001

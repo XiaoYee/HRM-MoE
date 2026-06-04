@@ -36,9 +36,17 @@ class LMHead(nn.Module):
         input_embedding = self.embed_tokens(batch["inputs"])
 
         # Model forward
+        moe_context = None
+        if "labels" in batch and getattr(self.model, "moe_num_experts", 0) > 0:
+            moe_context = {"aux_losses": [], "expert_counts": []}
+
+        model_kwargs = {k: v for k, v in batch.items() if k not in ("inputs", "labels")}
+        if moe_context is not None:
+            model_kwargs["moe_context"] = moe_context
+
         new_carry, logits = self.model(carry,
                                        input_embedding,
-                                       **{k: v for k, v in batch.items() if k not in ("inputs", "labels")},
+                                       **model_kwargs,
                                        **kwargs)
         logits = self.lm_head(logits)
 
@@ -49,10 +57,16 @@ class LMHead(nn.Module):
             masks = labels != IGNORE_LABEL_ID
 
             # Loss (CE in F32)
-            loss = F.cross_entropy(logits.to(torch.float32), labels.to(torch.long), ignore_index=IGNORE_LABEL_ID, reduction="sum")
+            ce_loss = F.cross_entropy(logits.to(torch.float32), labels.to(torch.long), ignore_index=IGNORE_LABEL_ID, reduction="sum")
             # AllReduce loss divisor. Divide by mean of valid tokens across all processes, as gradient will be averaged.
             loss_divisor = masks.sum().to(torch.float32)
             dist.all_reduce(loss_divisor, op=dist.ReduceOp.AVG)
+            loss = ce_loss / loss_divisor
+
+            if moe_context is not None and moe_context["aux_losses"]:
+                aux_loss = torch.stack(moe_context["aux_losses"]).mean()
+                aux_loss_scaled = aux_loss * getattr(self.model, "moe_router_aux_loss_coef", 0.0)
+                loss = loss + aux_loss_scaled
 
             # Accuracy
             with torch.no_grad():
@@ -64,11 +78,20 @@ class LMHead(nn.Module):
                 seq_is_valid = seq_num_valid_tokens > 0
                 # Metrics
                 metrics = {
-                    "loss": (loss.detach(), local_valid_counts),
+                    "loss": (ce_loss.detach(), local_valid_counts),
                     "accuracy": (is_correct.sum(), local_valid_counts),
                     "exact_accuracy": (((seq_num_tokens_correct == seq_num_valid_tokens) & seq_is_valid).sum(), seq_is_valid.sum()),
                 }
 
-            return new_carry, loss / loss_divisor, metrics
+                if moe_context is not None and moe_context["aux_losses"]:
+                    one = torch.ones((), dtype=torch.float32, device=loss.device)
+                    expert_counts = torch.stack(moe_context["expert_counts"]).sum(dim=0)
+                    expert_count_total = expert_counts.sum().clamp_min(1.0)
+                    metrics["moe_aux_loss"] = (aux_loss.detach(), one)
+                    metrics["moe_aux_loss_scaled"] = (aux_loss_scaled.detach(), one)
+                    metrics["moe_total_loss"] = (loss.detach(), one)
+                    metrics["moe_max_expert_frac"] = ((expert_counts.max() / expert_count_total).detach(), one)
+
+            return new_carry, loss, metrics
 
         return new_carry, logits

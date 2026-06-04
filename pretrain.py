@@ -77,6 +77,8 @@ class PretrainConfig(pydantic.BaseModel):
     seed: int = 0
     checkpoint_interval: int = 1
     log_interval: int = 5
+    compile_train_batch: bool = True
+    max_steps: Optional[int] = None
 
 
 @dataclass
@@ -177,6 +179,8 @@ def init_train(config: PretrainConfig, rank: int, world_size: int):
     # Train state
     # Estimated total training steps
     total_steps = int(config.epochs * train_metadata.total_length // config.global_batch_size)
+    if config.max_steps is not None:
+        total_steps = min(total_steps, config.max_steps)
     train_state = TrainState(
         model=model,
         carry=carry,
@@ -203,13 +207,15 @@ def update_lr(config: PretrainConfig, train_state: TrainState) -> float:
     return lr
 
 
-@torch.compile(dynamic=False)
-def train_batch(train_state: TrainState, batch: dict[str, Tensor], **kwargs):
+def train_batch_eager(train_state: TrainState, batch: dict[str, Tensor], **kwargs):
     train_state.carry, loss, metrics = train_state.model(batch=batch, carry=train_state.carry, **kwargs)
     loss.backward()
     train_state.optim.step()
     train_state.optim.zero_grad()
     return metrics
+
+
+train_batch_compiled = torch.compile(train_batch_eager, dynamic=False)
 
 
 @torch.inference_mode()
@@ -306,6 +312,10 @@ def load_synced_config(hydra_config: DictConfig, rank: int) -> PretrainConfig:
         if config.checkpoint_path is None:
             config.checkpoint_path = os.path.join("checkpoints", config.project_name, config.run_name)
 
+        if getattr(config.arch, "moe_num_experts", 0) > 0 and config.compile_train_batch:
+            print("[MoE] Disabling torch.compile for train_batch; sparse routing uses dynamic expert dispatch.")
+            config.compile_train_batch = False
+
         objects = [config]
 
     dist.broadcast_object_list(objects, src=0)
@@ -349,6 +359,9 @@ def launch(hydra_config: DictConfig):
         wandb.log({"num_params": sum(x.numel() for x in train_state.model.parameters())}, step=0)
         save_code_and_config(config, train_metadata)
 
+    train_batch_fn = train_batch_compiled if config.compile_train_batch else train_batch_eager
+    reached_max_steps = False
+
     # Training Loop
     for epoch in range(1, config.epochs + 1):
         print (f"[Rank {RANK}, World Size {WORLD_SIZE}]: Epoch {epoch}")
@@ -361,7 +374,7 @@ def launch(hydra_config: DictConfig):
             # Extra train arguments (such as BP warmup etc.)
             train_extra_args = train_state.model.compute_train_extra_args(train_state)  # pyright: ignore[reportCallIssue]
             
-            metrics = train_batch(train_state, batch | {k: wrap_tensor(torch.tensor(v, device="cpu")) for k, v in batch_info.items()}, **train_extra_args)
+            metrics = train_batch_fn(train_state, batch | {k: wrap_tensor(torch.tensor(v, device="cpu")) for k, v in batch_info.items()}, **train_extra_args)
 
             if train_state.step % config.log_interval == 0:
                 metrics = reduce_metrics(metrics, prefix="train/")
@@ -371,7 +384,16 @@ def launch(hydra_config: DictConfig):
 
             del metrics
 
+            if config.max_steps is not None and train_state.step >= config.max_steps:
+                reached_max_steps = True
+                if RANK == 0:
+                    print(f"[Train] Reached max_steps={config.max_steps}; stopping without epoch checkpoint.")
+                break
+
         ############ EVAL STACK: TBD TODO
+
+        if reached_max_steps:
+            break
 
         ############ Checkpointing
         if (epoch % config.checkpoint_interval == 0) or (epoch == config.epochs):

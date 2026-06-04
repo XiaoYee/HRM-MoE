@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-04 18:05 HKT。
+最后更新：2026-06-04 18:27 HKT。
 
 ## 16 卡基线实验
 
@@ -52,6 +52,54 @@ Checkpoint 完成时间：
   开始就退出。
 - rjob 名字要短。`hrm-pretrain-32g-xl-e4-gbs196k-offline-06041800` 的
   dry-run 在提交前失败，因为生成的 task label 超过 Kubernetes 63 字符限制。
+
+## 64 选 8 MoE 实验
+
+本实验按用户要求在独立 worktree 中实现，不改动主分支：
+`/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8`，分支
+`codex/hrm-moe64x8`。
+
+设计目标：
+
+| 项目 | 值 |
+| --- | --- |
+| 基座 | HRM XL，H/L 各 16 层 |
+| MoE 形式 | 参考 Qwen3 MoE 的 sparse FFN：router softmax 后 top-k dispatch |
+| Experts | 64 |
+| 每 token 选中 experts | 8 |
+| Expert FFN intermediate | 512 |
+| top-k 权重 | 默认归一化，便于替换 dense FFN 时保持输出尺度 |
+| Aux loss | Qwen/Switch 风格 load-balancing loss，系数 0.001 |
+| 训练调试策略 | 先用 8 卡 rjob、短 `max_steps` smoke 跑通分布式/FSDP/反向/optimizer |
+
+参数量粗略估计：
+
+| 项目 | 估计 |
+| --- | ---: |
+| Dense XL 原始总参数 | 约 1.18B |
+| MoE XL 64x8 总参数 | 约 5.4B |
+| 每 token 激活参数 | 约 1.18B |
+
+实现记录：
+
+- `models/layers.py` 新增 `SparseMoESwiGLU`，使用无 bias router、top-k expert
+  dispatch、按 routing weight 加权输出，并记录 load-balancing aux loss。
+- `models/transformer.py` 新增 `moe_*` 配置项；`moe_num_experts>0` 时将
+  TransformerBlock 的 dense `SwiGLU` 替换为 `SparseMoESwiGLU`。
+- `models/lm_head.py` 将 MoE aux loss 加到 CE loss 上，同时保留原始
+  `train/loss` 作为 CE/token 指标，额外记录 `moe_aux_loss`、
+  `moe_aux_loss_scaled`、`moe_total_loss`、`moe_max_expert_frac`。
+- `pretrain.py` 新增 `max_steps` 和 `compile_train_batch`；MoE 配置会自动关闭
+  `torch.compile`，因为 Qwen MoE 的动态 expert dispatch 对全图编译不友好。
+- 新增配置 `config/arch/size/XL_moe64x8.yaml`，rjob 可用
+  `arch_size=XL_moe64x8` 启动。
+
+本地检查：
+
+| 时间 | 检查 | 结果 | 备注 |
+| --- | --- | --- | --- |
+| 2026-06-04 18:27 HKT | `python -m py_compile ...` | passed | 覆盖 MoE 修改到的 Python 文件。 |
+| 2026-06-04 18:27 HKT | 小 MoE 前后向脚本 | 未在登录环境运行 | 登录环境缺 `einops`；按仓库约定，真实训练环境以后续 rjob 结果为准。 |
 
 ## 评测设置
 

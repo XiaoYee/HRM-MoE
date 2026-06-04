@@ -155,6 +155,14 @@ class Attention(nn.Module):
         return self.o_proj(attn_output)
 
 
+def load_balancing_loss_func(routing_weights: Tensor, selected_experts: Tensor, num_experts: int) -> Tensor:
+    """Qwen-style auxiliary load-balancing loss for top-k MoE routing."""
+    expert_mask = F.one_hot(selected_experts, num_classes=num_experts).to(torch.float32)
+    tokens_per_expert = expert_mask.mean(dim=0)
+    router_prob_per_expert = routing_weights.mean(dim=0)
+    return torch.sum(tokens_per_expert * router_prob_per_expert.unsqueeze(0)) * num_experts
+
+
 class SwiGLU(nn.Module):
     def __init__(self, hidden_size: int, intermediate_size: int, init_std_in=None, init_std_out=None, **kwargs):
         super().__init__()
@@ -163,6 +171,80 @@ class SwiGLU(nn.Module):
         self.down_proj    = LinearInit(intermediate_size, hidden_size,
                                        bias=False, init_std=init_std_out, **kwargs)
 
-    def forward(self, x):
+    def forward(self, x, **_seq_info):
         gate, up = self.gate_up_proj(x).chunk(2, dim=-1)
         return self.down_proj(F.silu(gate) * up)
+
+
+class SparseMoESwiGLU(nn.Module):
+    def __init__(self,
+                 hidden_size: int,
+                 intermediate_size: int,
+                 num_experts: int,
+                 top_k: int,
+                 norm_topk_prob: bool,
+                 init_std_in=None,
+                 init_std_out=None,
+                 **kwargs):
+        super().__init__()
+        if num_experts <= 0:
+            raise ValueError(f"num_experts must be positive, got {num_experts}")
+        if top_k <= 0 or top_k > num_experts:
+            raise ValueError(f"top_k must be in [1, num_experts], got top_k={top_k}, num_experts={num_experts}")
+
+        self.hidden_size = hidden_size
+        self.num_experts = num_experts
+        self.top_k = top_k
+        self.norm_topk_prob = norm_topk_prob
+
+        self.gate = LinearInit(hidden_size, num_experts, bias=False, init_std=init_std_in, **kwargs)
+        self.experts = nn.ModuleList([
+            SwiGLU(hidden_size=hidden_size,
+                   intermediate_size=intermediate_size,
+                   init_std_in=init_std_in,
+                   init_std_out=init_std_out,
+                   **kwargs)
+            for _ in range(num_experts)
+        ])
+
+    def forward(self,
+                x: Tensor,
+                moe_context: Optional[dict[str, Any]] = None,
+                total_seqlen: Optional[Tensor] = None,
+                **_seq_info) -> Tensor:
+        original_shape = x.shape
+        hidden_states = x.reshape(-1, self.hidden_size)
+
+        router_logits = self.gate(hidden_states)
+        routing_probs = F.softmax(router_logits, dim=-1, dtype=torch.float32)
+        routing_weights, selected_experts = torch.topk(routing_probs, self.top_k, dim=-1)
+        if self.norm_topk_prob:
+            routing_weights = routing_weights / routing_weights.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+        routing_weights = routing_weights.to(hidden_states.dtype)
+
+        final_hidden_states = torch.zeros_like(hidden_states)
+        for expert_idx, expert_layer in enumerate(self.experts):
+            token_idx, topk_idx = torch.where(selected_experts == expert_idx)
+            if token_idx.numel() == 0:
+                continue
+
+            expert_input = hidden_states[token_idx]
+            expert_output = expert_layer(expert_input)
+            expert_output = expert_output * routing_weights[token_idx, topk_idx, None]
+            final_hidden_states.index_add_(0, token_idx, expert_output.to(hidden_states.dtype))
+
+        if moe_context is not None and torch.is_grad_enabled():
+            aux_routing_probs = routing_probs
+            aux_selected_experts = selected_experts
+            if total_seqlen is not None:
+                valid_tokens = int(unwrap_tensor(total_seqlen).item())
+                aux_routing_probs = aux_routing_probs[:valid_tokens]
+                aux_selected_experts = aux_selected_experts[:valid_tokens]
+
+            aux_loss = load_balancing_loss_func(aux_routing_probs, aux_selected_experts, self.num_experts)
+            moe_context.setdefault("aux_losses", []).append(aux_loss)
+            with torch.no_grad():
+                expert_counts = torch.bincount(aux_selected_experts.reshape(-1), minlength=self.num_experts).to(torch.float32)
+                moe_context.setdefault("expert_counts", []).append(expert_counts)
+
+        return final_hidden_states.reshape(original_shape)

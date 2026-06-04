@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 from pydantic import BaseModel
 
-from models.layers import SwiGLU, AttnType, Attention, Cache, RotaryEmbedding, find_multiple
+from models.layers import SwiGLU, SparseMoESwiGLU, AttnType, Attention, Cache, RotaryEmbedding, find_multiple
 
 
 class InitConfig(BaseModel):
@@ -26,6 +26,13 @@ class TransformerConfig(BaseModel):
     hidden_size: int
     num_heads: int
     expansion: float
+
+    # Qwen-style sparse MoE FFN. moe_num_experts=0 keeps the dense SwiGLU.
+    moe_num_experts: int = 0
+    moe_top_k: int = 1
+    moe_intermediate_size: Optional[int] = None
+    moe_norm_topk_prob: bool = True
+    moe_router_aux_loss_coef: float = 0.0
 
     attn_type: AttnType = "prefixlm"
 
@@ -75,25 +82,47 @@ class TransformerBlock(nn.Module):
             init_std_in=config.init_config.in_std,
             init_std_out=config.init_config.attn_out_std
         )
-        self.mlp = SwiGLU(
-            hidden_size=config.hidden_size,
-            intermediate_size=config.intermediate_size,
-            
-            init_std_in=config.init_config.in_std,
-            init_std_out=config.init_config.ff_out_std
-        )
+        if config.moe_num_experts > 0:
+            moe_intermediate_size = config.moe_intermediate_size
+            if moe_intermediate_size is None:
+                moe_intermediate_size = find_multiple(max(1, config.intermediate_size // config.moe_top_k), 256)
+
+            self.mlp = SparseMoESwiGLU(
+                hidden_size=config.hidden_size,
+                intermediate_size=moe_intermediate_size,
+                num_experts=config.moe_num_experts,
+                top_k=config.moe_top_k,
+                norm_topk_prob=config.moe_norm_topk_prob,
+
+                init_std_in=config.init_config.in_std,
+                init_std_out=config.init_config.ff_out_std
+            )
+        else:
+            self.mlp = SwiGLU(
+                hidden_size=config.hidden_size,
+                intermediate_size=config.intermediate_size,
+
+                init_std_in=config.init_config.in_std,
+                init_std_out=config.init_config.ff_out_std
+            )
         
         self.forward = getattr(self, f"_forward_{config.norm_type}")  # Avoid branching logic in "forward" for torch.compile compatibility
         self.norm = lambda x: F.rms_norm(x, (x.shape[-1], ), eps=config.norm_eps)
 
     # [Forward logic]
     def _forward_pre(self, x: Tensor, **seq_info) -> Tensor:  # Pre Norm
-        x = x + self.attn(self.norm(x), **seq_info)
-        return x + self.mlp(self.norm(x))
+        attn_seq_info = seq_info
+        if "moe_context" in seq_info:
+            attn_seq_info = {k: v for k, v in seq_info.items() if k != "moe_context"}
+        x = x + self.attn(self.norm(x), **attn_seq_info)
+        return x + self.mlp(self.norm(x), **seq_info)
     
     def _forward_post(self, x: Tensor, **seq_info) -> Tensor:  # Post Norm
-        x = self.norm(x + self.attn(x, **seq_info))
-        return self.norm(x + self.mlp(x))
+        attn_seq_info = seq_info
+        if "moe_context" in seq_info:
+            attn_seq_info = {k: v for k, v in seq_info.items() if k != "moe_context"}
+        x = self.norm(x + self.attn(x, **attn_seq_info))
+        return self.norm(x + self.mlp(x, **seq_info))
 
 
 class Transformer(nn.Module):
