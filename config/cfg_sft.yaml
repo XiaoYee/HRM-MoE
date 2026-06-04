@@ -17,6 +17,7 @@ weights_only_resume_from_ema: false   # Set true to swap EMA into model and rese
 global_batch_size: 32768
 epochs: 5
 checkpoint_interval: 1
+log_interval: 5
 
 lr: 3.0e-5
 lr_min_ratio: 0.1
