@@ -1,6 +1,6 @@
 # HRM Pretrain Evaluation Results
 
-Last updated: 2026-06-04 15:01 HKT.
+Last updated: 2026-06-04 17:33 HKT.
 
 ## Experiment
 
@@ -61,8 +61,8 @@ GSM8k, MATH, DROP, MMLU, ARC, HellaSwag, Winogrande, BoolQ.
 | MMLU-Pro | 4 | `hrm-eval-e4-mmlupro-seq-0604` | succeeded | `rjob_logs/hrm-eval-fanout_0_0_bench_20260604_033704/summary.json` |
 | AIME25 | 1 | `hrm-eval-e1-aime25-0603` | succeeded | `rjob_logs/hrm-eval-fanout_0_0_bench_20260603_062938/summary.json` |
 | AIME25 | 2 | `hrm-eval-e2-aime25-seq-0603` | succeeded | `rjob_logs/hrm-eval-fanout_0_0_bench_20260603_093009/summary.json` |
-| AIME25 | 3 | `hrm-eval-e3-aime25-seq-0604` | running | pending |
-| AIME25 | 4 | `hrm-eval-e4-aime25-seq-0604` | running | pending |
+| AIME25 | 3 | `hrm-eval-e3-aime25-seq-0604` | succeeded | `rjob_logs/hrm-eval-fanout_0_0_bench_20260604_065156/summary.json` |
+| AIME25 | 4 | `hrm-eval-e4-aime25-seq-0604` | succeeded | `rjob_logs/hrm-eval-fanout_0_0_bench_20260604_070045/summary.json` |
 
 ## Main Metrics
 
@@ -100,17 +100,16 @@ DROP does not report an invalid rate in the current summary.
 
 ## AIME25 Majority Voting
 
-Values are shown as percentages. Epoch 3 and 4 jobs are running as of the last
-update and should be filled when their summaries appear.
+Values are shown as percentages.
 
 | Metric | Epoch 1 | Epoch 2 | Epoch 3 | Epoch 4 |
 | --- | ---: | ---: | ---: | ---: |
-| maj_pass@1 | 3.33 | 16.67 | pending | pending |
-| maj_pass@10 | 16.67 | 36.67 | pending | pending |
-| maj_pass@100 | 46.67 | 56.67 | pending | pending |
-| pass@1 | 0.90 | 3.98 | pending | pending |
-| pass@10 | 7.13 | 18.67 | pending | pending |
-| pass@100 | 29.17 | 44.16 | pending | pending |
+| maj_pass@1 | 3.33 | 16.67 | 13.33 | 23.33 |
+| maj_pass@10 | 16.67 | 36.67 | 30.00 | 33.33 |
+| maj_pass@100 | 46.67 | 56.67 | 60.00 | 50.00 |
+| pass@1 | 0.90 | 3.98 | 3.62 | 5.59 |
+| pass@10 | 7.13 | 18.67 | 18.29 | 22.01 |
+| pass@100 | 29.17 | 44.16 | 44.16 | 41.58 |
 
 ## Standard Benchmark Sample Counts
 
@@ -135,7 +134,8 @@ sample counts are available in the raw benchmark logs.
 - The standard benchmark suite improves monotonically from epoch 1 to epoch 4 on
   all primary metrics listed above.
 - MMLU-Pro improves from 19.57 percent at epoch 1 to 33.11 percent at epoch 4.
-- AIME25 improved substantially from epoch 1 to epoch 2; epoch 3 and 4 are still
-  running at the time of this update.
+- AIME25 epoch 4 has the best maj_pass@1, pass@1, and pass@10. Epoch 3 has the
+  best maj_pass@100/pass@100, so the high-sample majority-vote metric is not
+  monotonic across epochs.
 - The training data is the sampled HRM/Data IO instruction-response PrefixLM
   dataset, not a one-off dataset built from the evaluation test sets.
