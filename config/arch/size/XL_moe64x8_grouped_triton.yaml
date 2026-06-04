@@ -15,15 +15,15 @@ pos_emb_type: rope
 # NOTE: Maybe larger init increases non-residual contribution, and layers are more effective?
 init_type: lecun_normal
 
-# Qwen-style sparse MoE FFN with grouped expert compute.
+# Qwen-style sparse MoE FFN with Triton grouped expert compute.
 # Each dense SwiGLU FFN has intermediate_size=4096 for XL. With top_k=8 and
 # moe_intermediate_size=512, active expert FFN width matches the dense FFN.
-# The grouped implementation keeps routing math identical to origin/shard, but
-# uses one expert-sorted dispatch plus padded batched GEMM for gate/up/down.
+# This backend uses the same router/scatter semantics as grouped-bmm, but swaps
+# the two padded bmm expert projections for unpadded Triton grouped GEMMs.
 moe_num_experts: 64
 moe_top_k: 8
 moe_intermediate_size: 512
 moe_norm_topk_prob: true
 moe_router_aux_loss_coef: 0.001
-moe_implementation: grouped
+moe_implementation: grouped_triton
 moe_expert_in_one_shard: 1

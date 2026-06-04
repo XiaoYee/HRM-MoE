@@ -24,5 +24,6 @@ beta2: 0.95
 ema: 0.9999
 
 compile_train_batch: true
+allow_compile_moe: false
 fsdp_wrap_moe_experts: true
 max_steps: null

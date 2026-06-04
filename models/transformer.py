@@ -33,7 +33,7 @@ class TransformerConfig(BaseModel):
     moe_intermediate_size: Optional[int] = None
     moe_norm_topk_prob: bool = True
     moe_router_aux_loss_coef: float = 0.0
-    moe_implementation: Literal["origin", "shard", "grouped"] = "origin"
+    moe_implementation: Literal["origin", "shard", "grouped", "grouped_triton", "grouped_cutlass", "grouped_ep"] = "origin"
     moe_expert_in_one_shard: int = 1
 
     attn_type: AttnType = "prefixlm"

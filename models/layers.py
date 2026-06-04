@@ -1,13 +1,17 @@
 from typing import Tuple, Optional, Sequence, Any, NamedTuple, Literal
 import math
+import os
 
 import torch
+import torch.distributed as dist
 from torch import Tensor, nn
 import torch.nn.functional as F
 from einops import rearrange
 
 from models.common import trunc_normal_init_, unwrap_tensor
 from models.flash_attention_prefixlm_v2 import flash_attn_varlen_prefixlm
+from models.moe_cutlass_grouped_gemm import cutlass_grouped_linear
+from models.moe_triton_grouped_gemm import triton_grouped_linear
 from flash_attn_interface import flash_attn_with_kvcache
 
 
@@ -157,10 +161,12 @@ class Attention(nn.Module):
 
 def load_balancing_loss_func(routing_weights: Tensor, selected_experts: Tensor, num_experts: int) -> Tensor:
     """Qwen-style auxiliary load-balancing loss for top-k MoE routing."""
-    expert_mask = F.one_hot(selected_experts, num_classes=num_experts).to(torch.float32)
-    tokens_per_expert = expert_mask.mean(dim=0)
+    tokens_per_expert = torch.bincount(
+        selected_experts.reshape(-1),
+        minlength=num_experts,
+    ).to(torch.float32) / selected_experts.shape[0]
     router_prob_per_expert = routing_weights.mean(dim=0)
-    return torch.sum(tokens_per_expert * router_prob_per_expert.unsqueeze(0)) * num_experts
+    return torch.sum(tokens_per_expert * router_prob_per_expert) * num_experts
 
 
 class SwiGLU(nn.Module):
@@ -243,12 +249,15 @@ class SparseMoEGroupedExperts(nn.Module):
                  hidden_size: int,
                  intermediate_size: int,
                  num_experts: int,
+                 backend: Literal["loop", "bmm", "triton", "cutlass"] = "bmm",
                  init_std_in=None,
                  init_std_out=None,
                  **kwargs):
         super().__init__()
         if num_experts <= 0:
             raise ValueError(f"num_experts must be positive, got {num_experts}")
+        if backend not in ("loop", "bmm", "triton", "cutlass"):
+            raise ValueError(f"Unsupported grouped MoE backend: {backend}")
 
         if init_std_in is None:
             init_std_in = 1.0 / (hidden_size ** 0.5)
@@ -257,6 +266,7 @@ class SparseMoEGroupedExperts(nn.Module):
 
         self.num_experts = num_experts
         self.expert_in_one_shard = num_experts
+        self.backend = backend
 
         self.gate_up_weight = nn.Parameter(
             trunc_normal_init_(
@@ -280,6 +290,22 @@ class SparseMoEGroupedExperts(nn.Module):
         if num_tokens == 0:
             return final_hidden_states
 
+        gate_up_weight = self.gate_up_weight.to(hidden_states.dtype)
+        down_weight = self.down_weight.to(hidden_states.dtype)
+        if self.backend == "loop":
+            for expert_idx in range(self.num_experts):
+                token_idx, topk_idx = torch.where(selected_experts == expert_idx)
+                if token_idx.numel() == 0:
+                    continue
+
+                expert_input = hidden_states[token_idx]
+                gate_up = F.linear(expert_input, gate_up_weight[expert_idx])
+                gate, up = gate_up.chunk(2, dim=-1)
+                expert_output = F.linear(F.silu(gate) * up, down_weight[expert_idx])
+                expert_output = expert_output * routing_weights[token_idx, topk_idx, None]
+                final_hidden_states.index_add_(0, token_idx, expert_output.to(hidden_states.dtype))
+            return final_hidden_states
+
         top_k = selected_experts.shape[-1]
         flat_experts = selected_experts.reshape(-1)
         flat_weights = routing_weights.reshape(-1)
@@ -291,6 +317,15 @@ class SparseMoEGroupedExperts(nn.Module):
         sorted_hidden_states = hidden_states.index_select(0, sorted_token_idx)
 
         tokens_per_expert = torch.bincount(sorted_experts, minlength=self.num_experts)
+        if self.backend in ("triton", "cutlass"):
+            grouped_linear = triton_grouped_linear if self.backend == "triton" else cutlass_grouped_linear
+            gate_up = grouped_linear(sorted_hidden_states, gate_up_weight, tokens_per_expert)
+            gate, up = gate_up.chunk(2, dim=-1)
+            expert_output = grouped_linear(F.silu(gate) * up, down_weight, tokens_per_expert)
+            expert_output = expert_output * sorted_weights[:, None]
+            final_hidden_states.index_add_(0, sorted_token_idx, expert_output.to(hidden_states.dtype))
+            return final_hidden_states
+
         max_tokens_per_expert = int(tokens_per_expert.max().item())
         expert_offsets = torch.zeros((self.num_experts + 1,), device=hidden_states.device, dtype=torch.long)
         expert_offsets[1:] = torch.cumsum(tokens_per_expert, dim=0)
@@ -299,12 +334,128 @@ class SparseMoEGroupedExperts(nn.Module):
         grouped_hidden_states = hidden_states.new_zeros((self.num_experts, max_tokens_per_expert, hidden_states.shape[-1]))
         grouped_hidden_states[sorted_experts, positions_in_expert] = sorted_hidden_states
 
-        gate_up = torch.bmm(grouped_hidden_states, self.gate_up_weight.transpose(1, 2))
+        gate_up = torch.bmm(grouped_hidden_states, gate_up_weight.transpose(1, 2))
         gate, up = gate_up.chunk(2, dim=-1)
-        grouped_expert_output = torch.bmm(F.silu(gate) * up, self.down_weight.transpose(1, 2))
+        grouped_expert_output = torch.bmm(F.silu(gate) * up, down_weight.transpose(1, 2))
         expert_output = grouped_expert_output[sorted_experts, positions_in_expert]
         expert_output = expert_output * sorted_weights[:, None]
         final_hidden_states.index_add_(0, sorted_token_idx, expert_output.to(hidden_states.dtype))
+        return final_hidden_states
+
+
+class _AllToAllSingle(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input_tensor: Tensor, send_counts: Tensor, recv_counts: Tensor) -> Tensor:
+        send_splits = tuple(send_counts.detach().cpu().tolist())
+        recv_splits = tuple(recv_counts.detach().cpu().tolist())
+        output = input_tensor.new_empty((sum(recv_splits), *input_tensor.shape[1:]))
+        dist.all_to_all_single(output, input_tensor.contiguous(), list(recv_splits), list(send_splits))
+        ctx.send_splits = send_splits
+        ctx.recv_splits = recv_splits
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output: Tensor):
+        grad_input = grad_output.new_empty((sum(ctx.send_splits), *grad_output.shape[1:]))
+        dist.all_to_all_single(
+            grad_input,
+            grad_output.contiguous(),
+            list(ctx.send_splits),
+            list(ctx.recv_splits),
+        )
+        return grad_input, None, None
+
+
+class SparseMoEExpertParallel(nn.Module):
+    exclude_from_fsdp = True
+
+    def __init__(self,
+                 hidden_size: int,
+                 intermediate_size: int,
+                 num_experts: int,
+                 backend: Literal["loop", "bmm", "triton", "cutlass"] = "triton",
+                 init_std_in=None,
+                 init_std_out=None,
+                 **kwargs):
+        super().__init__()
+        world_size = dist.get_world_size() if dist.is_available() and dist.is_initialized() else 1
+        rank = dist.get_rank() if dist.is_available() and dist.is_initialized() else 0
+        if num_experts % world_size != 0:
+            raise ValueError(f"num_experts={num_experts} must divide world_size={world_size} for grouped_ep")
+
+        self.num_experts = num_experts
+        self.ep_size = world_size
+        self.ep_rank = rank
+        self.experts_per_rank = num_experts // world_size
+        self.expert_in_one_shard = self.experts_per_rank
+        self.local_expert_start = self.ep_rank * self.experts_per_rank
+        self.local_experts = SparseMoEGroupedExperts(hidden_size=hidden_size,
+                                                     intermediate_size=intermediate_size,
+                                                     num_experts=self.experts_per_rank,
+                                                     backend=backend,
+                                                     init_std_in=init_std_in,
+                                                     init_std_out=init_std_out,
+                                                     **kwargs)
+
+    def _all_to_all_tensor(self,
+                           input_tensor: Tensor,
+                           send_counts: Tensor,
+                           recv_counts: Tensor) -> Tensor:
+        if input_tensor.requires_grad and input_tensor.is_floating_point():
+            return _AllToAllSingle.apply(input_tensor, send_counts, recv_counts)
+
+        send_splits = send_counts.detach().cpu().tolist()
+        recv_splits = recv_counts.detach().cpu().tolist()
+        output = input_tensor.new_empty((sum(recv_splits), *input_tensor.shape[1:]))
+        dist.all_to_all_single(output, input_tensor.contiguous(), recv_splits, send_splits)
+        return output
+
+    def forward(self,
+                hidden_states: Tensor,
+                selected_experts: Tensor,
+                routing_weights: Tensor,
+                final_hidden_states: Tensor) -> Tensor:
+        if self.ep_size == 1:
+            return self.local_experts(hidden_states, selected_experts, routing_weights, final_hidden_states)
+
+        num_tokens = hidden_states.shape[0]
+        if num_tokens == 0:
+            return final_hidden_states
+
+        top_k = selected_experts.shape[-1]
+        flat_experts = selected_experts.reshape(-1)
+        flat_weights = routing_weights.reshape(-1)
+        flat_token_idx = torch.arange(num_tokens, device=hidden_states.device).repeat_interleave(top_k)
+
+        dest_ranks = torch.div(flat_experts, self.experts_per_rank, rounding_mode="floor")
+        local_experts = flat_experts - dest_ranks * self.experts_per_rank
+        sorted_dest_ranks, sort_idx = torch.sort(dest_ranks, stable=True)
+        sorted_token_idx = flat_token_idx.index_select(0, sort_idx)
+        sorted_local_experts = local_experts.index_select(0, sort_idx)
+        sorted_weights = flat_weights.index_select(0, sort_idx)
+        sorted_global_experts = flat_experts.index_select(0, sort_idx)
+        dispatch_hidden = hidden_states.index_select(0, sorted_token_idx)
+
+        send_counts = torch.bincount(sorted_dest_ranks, minlength=self.ep_size).to(torch.int64)
+        recv_counts = torch.empty_like(send_counts)
+        dist.all_to_all_single(recv_counts, send_counts)
+
+        received_hidden = self._all_to_all_tensor(dispatch_hidden, send_counts, recv_counts)
+        received_local_experts = self._all_to_all_tensor(sorted_local_experts[:, None], send_counts, recv_counts).reshape(-1)
+
+        local_output = self.local_experts(
+            received_hidden,
+            received_local_experts[:, None],
+            torch.ones((received_hidden.shape[0], 1), device=received_hidden.device, dtype=received_hidden.dtype),
+            torch.zeros_like(received_hidden),
+        )
+
+        returned_output = self._all_to_all_tensor(local_output, recv_counts, send_counts)
+        returned_output = returned_output * sorted_weights[:, None]
+        _, combine_idx = torch.sort(sorted_global_experts, stable=True)
+        combine_token_idx = sorted_token_idx.index_select(0, combine_idx)
+        combine_output = returned_output.index_select(0, combine_idx)
+        final_hidden_states.index_add_(0, combine_token_idx, combine_output.to(hidden_states.dtype))
         return final_hidden_states
 
 
@@ -352,7 +503,7 @@ class SparseMoESwiGLU(nn.Module):
                  num_experts: int,
                  top_k: int,
                  norm_topk_prob: bool,
-                 implementation: Literal["origin", "shard", "grouped"] = "origin",
+                 implementation: Literal["origin", "shard", "grouped", "grouped_triton", "grouped_cutlass", "grouped_ep"] = "origin",
                  expert_in_one_shard: int = 1,
                  init_std_in=None,
                  init_std_out=None,
@@ -376,10 +527,26 @@ class SparseMoESwiGLU(nn.Module):
         self.expert_in_one_shard = expert_in_one_shard
 
         self.gate = LinearInit(hidden_size, num_experts, bias=False, init_std=init_std_in, **kwargs)
-        if implementation == "grouped":
+        if implementation in ("grouped", "grouped_triton", "grouped_cutlass"):
             self.experts = SparseMoEGroupedExperts(hidden_size=hidden_size,
                                                    intermediate_size=intermediate_size,
                                                    num_experts=num_experts,
+                                                   backend=(
+                                                       "triton" if implementation == "grouped_triton"
+                                                       else "cutlass" if implementation == "grouped_cutlass"
+                                                       else "bmm"
+                                                   ),
+                                                   init_std_in=init_std_in,
+                                                   init_std_out=init_std_out,
+                                                   **kwargs)
+            return
+
+        if implementation == "grouped_ep":
+            ep_backend = os.environ.get("HRM_MOE_EP_BACKEND") or "triton"
+            self.experts = SparseMoEExpertParallel(hidden_size=hidden_size,
+                                                   intermediate_size=intermediate_size,
+                                                   num_experts=num_experts,
+                                                   backend=ep_backend,  # type: ignore[arg-type]
                                                    init_std_in=init_std_in,
                                                    init_std_out=init_std_out,
                                                    **kwargs)

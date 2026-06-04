@@ -79,6 +79,7 @@ class PretrainConfig(pydantic.BaseModel):
     checkpoint_interval: int = 1
     log_interval: int = 5
     compile_train_batch: bool = True
+    allow_compile_moe: bool = False
     profile_train_batch: bool = False
     fsdp_wrap_moe_experts: bool = True
     max_steps: Optional[int] = None
@@ -121,11 +122,12 @@ def create_dataloader(config: PretrainConfig, local_batch_size: int, drop_last_b
     return dataloader, dataset.metadata
 
 
-def apply_fsdp(module: nn.Module, param_dtype: torch.dtype):
+def apply_fsdp(module: nn.Module, param_dtype: torch.dtype, ignored_params: set[nn.Parameter] | None = None):
     fully_shard(module,
                 mp_policy=MixedPrecisionPolicy(param_dtype=param_dtype,
                                                reduce_dtype=torch.get_default_dtype()),  # Use master dtype for reduction
-                reshard_after_forward=False)  # Trade off VRAM for less comms
+                reshard_after_forward=False,
+                ignored_params=ignored_params)  # Trade off VRAM for less comms
     
     assert isinstance(module, FSDPModule)
     # Disable gradient division. Adams is scale invariant.
@@ -147,6 +149,13 @@ def create_model_and_carry(config: PretrainConfig, train_metadata: V1DatasetMeta
         # Attach loss head
         model = head_cls(model, model_cfg)
 
+    ignored_fsdp_params = {
+        param
+        for module in model.modules()
+        if getattr(module, "exclude_from_fsdp", False)
+        for param in module.parameters()
+    }
+
     # ----FSDP----
     # Broadcast buffers
     for buffer in model.buffers():
@@ -156,11 +165,16 @@ def create_model_and_carry(config: PretrainConfig, train_metadata: V1DatasetMeta
     for module in model.modules():
         if isinstance(module, TransformerBlock):
             moe_experts = getattr(getattr(module, "mlp", None), "experts", None)
-            if config.fsdp_wrap_moe_experts and moe_experts is not None:
+            if (
+                config.fsdp_wrap_moe_experts
+                and moe_experts is not None
+                and not getattr(moe_experts, "exclude_from_fsdp", False)
+            ):
                 apply_fsdp(moe_experts, fwd_bwd_dtype)
-            apply_fsdp(module, fwd_bwd_dtype)
+            module_ignored_params = ignored_fsdp_params.intersection(set(module.parameters()))
+            apply_fsdp(module, fwd_bwd_dtype, ignored_params=(module_ignored_params or None))
 
-    apply_fsdp(model, fwd_bwd_dtype)
+    apply_fsdp(model, fwd_bwd_dtype, ignored_params=(ignored_fsdp_params or None))
 
     # ----Create optimizer----
     optim = AdamATan2(model.parameters(),
@@ -335,7 +349,11 @@ def load_synced_config(hydra_config: DictConfig, rank: int) -> PretrainConfig:
         if config.checkpoint_path is None:
             config.checkpoint_path = os.path.join("checkpoints", config.project_name, config.run_name)
 
-        if getattr(config.arch, "moe_num_experts", 0) > 0 and config.compile_train_batch:
+        if (
+            getattr(config.arch, "moe_num_experts", 0) > 0
+            and config.compile_train_batch
+            and not config.allow_compile_moe
+        ):
             print("[MoE] Disabling torch.compile for train_batch; sparse routing uses dynamic expert dispatch.")
             config.compile_train_batch = False
 

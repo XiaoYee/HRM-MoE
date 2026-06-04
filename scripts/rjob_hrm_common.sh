@@ -92,6 +92,12 @@ rjob_env=(
   -e "HRM_EVAL_WORKDIR=${eval_workdir:-}"
   -e "HRM_EVAL_MAX_PARALLEL=${eval_max_parallel:-${HRM_EVAL_MAX_PARALLEL:-}}"
   -e "HRM_EVAL_DATA_DIR=${HRM_EVAL_DATA_DIR:-${eval_data_dir:-}}"
+  -e "HRM_MOE_EQUIV_SCRIPT=${moe_equiv_script:-${HRM_MOE_EQUIV_SCRIPT:-}}"
+  -e "HRM_MOE_EQUIV_DISTRIBUTED=${moe_equiv_distributed:-${HRM_MOE_EQUIV_DISTRIBUTED:-}}"
+  -e "HRM_MOE_EP_BACKEND=${moe_ep_backend:-${HRM_MOE_EP_BACKEND:-}}"
+  -e "HRM_MOE_TRITON_AUTOTUNE=${moe_triton_autotune:-${HRM_MOE_TRITON_AUTOTUNE:-}}"
+  -e "HRM_MOE_TRITON_BLOCK_M=${moe_triton_block_m:-${HRM_MOE_TRITON_BLOCK_M:-}}"
+  -e "HRM_MOE_TRITON_SM_MARGIN=${moe_triton_sm_margin:-${HRM_MOE_TRITON_SM_MARGIN:-}}"
   -e "WANDB_MODE=${WANDB_MODE:-online}"
 )
 

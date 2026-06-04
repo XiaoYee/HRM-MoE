@@ -383,6 +383,30 @@ python scripts/prepare_sft_data.py \
   AIME25 local data is `math-ai/aime25/test.jsonl`, so the local eval loader
   must use the `json` dataset builder for AIME instead of assuming every cached
   benchmark file is parquet.
+- For 64x8 MoE speed work, precision is a hard gate. Run local equivalence and
+  the CUDA/bfloat16 rjob gate before treating a kernel, dispatch, or FSDP/EP
+  change as usable. Do not trade away router fp32 softmax, top-k=8, routing
+  weight normalization, or index-add aggregation semantics for speed.
+- The current fastest safe 64x8 MoE path is grouped Triton expert compute with
+  `HRM_MOE_TRITON_AUTOTUNE=1` and `HRM_MOE_TRITON_SM_MARGIN=8` or `16`.
+  `HRM_MOE_TRITON_BLOCK_M=64` and `SM_MARGIN=32` were slower in same-shape
+  smoke runs. Keep the wrapper env parsing tolerant of empty string values
+  because rjob launchers pass unset env vars explicitly.
+- CUTLASS `grouped_gemm` passed the CUDA/bfloat16 equivalence gate in the
+  XTuner fallback image, but the training smoke was much slower than Triton
+  because backward/wgrad dominated. Do not switch the default MoE backend to
+  CUTLASS without a new precision gate and a faster same-shape smoke.
+- Do not use `torch.compile` for MoE `train_batch` by default. The force-compile
+  smoke caused graph breaks/recompilation and very large optimizer-step times.
+  Keep MoE compile disabled unless a fresh gate proves both correctness and
+  speed.
+- Expert Parallel all-to-all equivalence is not sufficient. The custom
+  autograd all-to-all path passed distributed correctness, but multi-step
+  training still stalled on the second backward. EP changes need a multi-step
+  training gate, not just a forward/backward equivalence script.
+- Keep the MoE dispatch `torch.sort(..., stable=True)` unless a new same-shape
+  smoke proves otherwise. A default-sort experiment passed numerical
+  equivalence but slowed the Triton path, so it was reverted.
 
 ## Local Validation
 
