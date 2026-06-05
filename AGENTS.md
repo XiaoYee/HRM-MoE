@@ -455,6 +455,17 @@ python scripts/prepare_sft_data.py \
   `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8`; speed tuning moved to
   `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8-tune` so code edits do
   not perturb the running training job.
+- Evaluate MoE checkpoints from the same MoE worktree that produced them; the
+  dense HRM-Text checkout may not have the experimental MoE architecture and
+  config classes needed to load the checkpoint. The shared monitor script can
+  be reused from the main checkout with
+  `HRM_MONITOR_REPO_DIR=/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8`
+  so rjob evals launch from this worktree and write summaries/docs here.
+- This worktree's `rjob_logs/` may be root-owned because many MoE rjobs wrote
+  logs from containers. If a local monitor cannot create its state/log there,
+  put the local monitor state and tee log in a writable checkout such as
+  `/mnt/shared-storage-user/quxiaoye/HRM-Text/rjob_logs/`, while keeping
+  `fanout.output_dir` under the MoE worktree for container-written summaries.
 
 ## Local Validation
 

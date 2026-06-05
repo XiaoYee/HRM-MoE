@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-05 01:03 HKT。
+最后更新：2026-06-05 09:45:29 HKT。
 
 ## 16 卡基线实验
 
@@ -706,3 +706,76 @@ GSM8k, MATH, DROP, MMLU, ARC, HellaSwag, Winogrande, BoolQ.
 - 当前训练数据是 sampled HRM/Data IO instruction-response PrefixLM 数据，不是
   针对评测测试集临时构造的一次性数据。
 - 后续所有训练、评测、失败尝试、清理动作和分析结论都用中文追加到本文档。
+
+<!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:start -->
+## 32 卡在线评测监控：`hrm-moe32g-sm16-06050339`
+
+最后刷新：2026-06-05 09:45:29 HKT。
+
+| 项目 | 值 |
+| --- | --- |
+| Job | `hrm-moe32g-sm16-06050339` |
+| 状态 | Running |
+| Checkpoint | `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8/checkpoints/hrm-moe32g-sm16-06050339` |
+| 评测数据 | `/mnt/shared-storage-user/quxiaoye/HRM-Text/eval_data_hf_parquet` |
+| 提交策略 | 每个 epoch 完成并稳定后提交 Standard / MMLU-Pro / AIME25，各 8 GPUs fanout |
+
+评测任务索引：
+
+| Eval set | Epoch | Job | 状态 | Summary |
+| --- | --- | --- | --- | --- |
+| Standard | 1 | `hrmmoe32-0605-e1-std` | waiting_checkpoint | - |
+| MMLU-Pro | 1 | `hrmmoe32-0605-e1-mmlu` | waiting_checkpoint | - |
+| AIME25 | 1 | `hrmmoe32-0605-e1-aime` | waiting_checkpoint | - |
+| Standard | 2 | `hrmmoe32-0605-e2-std` | waiting_checkpoint | - |
+| MMLU-Pro | 2 | `hrmmoe32-0605-e2-mmlu` | waiting_checkpoint | - |
+| AIME25 | 2 | `hrmmoe32-0605-e2-aime` | waiting_checkpoint | - |
+| Standard | 3 | `hrmmoe32-0605-e3-std` | waiting_checkpoint | - |
+| MMLU-Pro | 3 | `hrmmoe32-0605-e3-mmlu` | waiting_checkpoint | - |
+| AIME25 | 3 | `hrmmoe32-0605-e3-aime` | waiting_checkpoint | - |
+| Standard | 4 | `hrmmoe32-0605-e4-std` | waiting_checkpoint | - |
+| MMLU-Pro | 4 | `hrmmoe32-0605-e4-mmlu` | waiting_checkpoint | - |
+| AIME25 | 4 | `hrmmoe32-0605-e4-aime` | waiting_checkpoint | - |
+
+主指标（百分比）：
+
+| Benchmark | Metric | Epoch 1 | Epoch 2 | Epoch 3 | Epoch 4 |
+| --- | --- | --- | --- | --- | --- |
+| GSM8k | acc | - | - | - | - |
+| MATH | acc | - | - | - | - |
+| DROP | em | - | - | - | - |
+| DROP | f1 | - | - | - | - |
+| MMLU | acc | - | - | - | - |
+| ARC | acc | - | - | - | - |
+| HellaSwag | acc | - | - | - | - |
+| Winogrande | acc | - | - | - | - |
+| BoolQ | acc | - | - | - | - |
+| MMLU-Pro | acc | - | - | - | - |
+
+Invalid Rate（百分比）：
+
+| Benchmark | Epoch 1 | Epoch 2 | Epoch 3 | Epoch 4 |
+| --- | --- | --- | --- | --- |
+| GSM8k | - | - | - | - |
+| MATH | - | - | - | - |
+| MMLU | - | - | - | - |
+| ARC | - | - | - | - |
+| HellaSwag | - | - | - | - |
+| Winogrande | - | - | - | - |
+| BoolQ | - | - | - | - |
+| MMLU-Pro | - | - | - | - |
+
+AIME25 Majority Voting（百分比）：
+
+| Metric | Epoch 1 | Epoch 2 | Epoch 3 | Epoch 4 |
+| --- | --- | --- | --- | --- |
+| maj_pass@1 | - | - | - | - |
+| maj_pass@10 | - | - | - | - |
+| maj_pass@100 | - | - | - | - |
+| pass@1 | - | - | - | - |
+| pass@10 | - | - | - | - |
+| pass@100 | - | - | - | - |
+
+最近运行记录：
+- 2026-06-05 09:45:29 HKT：Training job hrm-moe32g-sm16-06050339 is Running.
+<!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:end -->
