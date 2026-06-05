@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-05 09:45:29 HKT。
+最后更新：2026-06-05 09:49:07 HKT。
 
 ## 16 卡基线实验
 
@@ -710,7 +710,7 @@ GSM8k, MATH, DROP, MMLU, ARC, HellaSwag, Winogrande, BoolQ.
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:start -->
 ## 32 卡在线评测监控：`hrm-moe32g-sm16-06050339`
 
-最后刷新：2026-06-05 09:45:29 HKT。
+最后刷新：2026-06-05 09:49:07 HKT。
 
 | 项目 | 值 |
 | --- | --- |
@@ -778,4 +778,5 @@ AIME25 Majority Voting（百分比）：
 
 最近运行记录：
 - 2026-06-05 09:45:29 HKT：Training job hrm-moe32g-sm16-06050339 is Running.
+- 2026-06-05 09:49:06 HKT：Monitor started.
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:end -->
