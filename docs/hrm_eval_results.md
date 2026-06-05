@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-05 23:24:51 HKT。
+最后更新：2026-06-05 23:29:58 HKT。
 
 ## 16 卡基线实验
 
@@ -739,7 +739,7 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:start -->
 ## 32 卡在线评测监控：`hrm-moe32g-sm16-06050339`
 
-最后刷新：2026-06-05 23:24:51 HKT。
+最后刷新：2026-06-05 23:29:58 HKT。
 
 | 项目 | 值 |
 | --- | --- |
@@ -753,7 +753,7 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 
 | Eval set | Epoch | Job | 状态 | Summary |
 | --- | --- | --- | --- | --- |
-| Standard | 1 | `hrmmoe32-0605-e1-std` | running | - |
+| Standard | 1 | `hrmmoe32-0605-e1-std` | succeeded | `rjob_logs/hrmmoe32-0605-e1-std_bench/summary.json` |
 | MMLU-Pro | 1 | `hrmmoe32-0605-e1-mmlu` | succeeded | `rjob_logs/hrmmoe32-0605-e1-mmlu_bench/summary.json` |
 | AIME25 | 1 | `hrmmoe32-0605-e1-aime` | running | - |
 | Standard | 2 | `hrmmoe32-0605-e2-std` | waiting_checkpoint | - |
@@ -770,28 +770,28 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 
 | Benchmark | Metric | Epoch 1 | Epoch 2 | Epoch 3 | Epoch 4 |
 | --- | --- | --- | --- | --- | --- |
-| GSM8k | acc | - | - | - | - |
-| MATH | acc | - | - | - | - |
-| DROP | em | - | - | - | - |
-| DROP | f1 | - | - | - | - |
-| MMLU | acc | - | - | - | - |
-| ARC | acc | - | - | - | - |
-| HellaSwag | acc | - | - | - | - |
-| Winogrande | acc | - | - | - | - |
-| BoolQ | acc | - | - | - | - |
+| GSM8k | acc | 71.27 | - | - | - |
+| MATH | acc | 45.26 | - | - | - |
+| DROP | em | 67.85 | - | - | - |
+| DROP | f1 | 71.62 | - | - | - |
+| MMLU | acc | 49.64 | - | - | - |
+| ARC | acc | 63.63 | - | - | - |
+| HellaSwag | acc | 38.20 | - | - | - |
+| Winogrande | acc | 61.56 | - | - | - |
+| BoolQ | acc | 80.92 | - | - | - |
 | MMLU-Pro | acc | 20.79 | - | - | - |
 
 Invalid Rate（百分比）：
 
 | Benchmark | Epoch 1 | Epoch 2 | Epoch 3 | Epoch 4 |
 | --- | --- | --- | --- | --- |
-| GSM8k | - | - | - | - |
-| MATH | - | - | - | - |
-| MMLU | - | - | - | - |
-| ARC | - | - | - | - |
-| HellaSwag | - | - | - | - |
-| Winogrande | - | - | - | - |
-| BoolQ | - | - | - | - |
+| GSM8k | 1.36 | - | - | - |
+| MATH | 7.06 | - | - | - |
+| MMLU | 0.25 | - | - | - |
+| ARC | 0.26 | - | - | - |
+| HellaSwag | 0.00 | - | - | - |
+| Winogrande | 0.00 | - | - | - |
+| BoolQ | 0.00 | - | - | - |
 | MMLU-Pro | 2.61 | - | - | - |
 
 AIME25 Majority Voting（百分比）：
@@ -806,8 +806,6 @@ AIME25 Majority Voting（百分比）：
 | pass@100 | - | - | - | - |
 
 最近运行记录：
-- 2026-06-05 09:49:06 HKT：Monitor started.
-- 2026-06-05 21:53:40 HKT：Epoch 1 checkpoint is stable; submitting all eval sets.
 - 2026-06-05 21:53:41 HKT：Submitted hrmmoe32-0605-e1-std for epoch 1 Standard.
 - 2026-06-05 21:53:42 HKT：Submitted hrmmoe32-0605-e1-mmlu for epoch 1 MMLU-Pro.
 - 2026-06-05 21:53:43 HKT：Submitted hrmmoe32-0605-e1-aime for epoch 1 AIME25.
@@ -818,4 +816,6 @@ AIME25 Majority Voting（百分比）：
 - 2026-06-05 23:24:49 HKT：Eval job hrmmoe32-0605-e1-aime is Running.
 - 2026-06-05 23:24:50 HKT：Eval job hrmmoe32-0605-e1-mmlu is Succeeded.
 - 2026-06-05 23:24:51 HKT：Loaded summary for hrmmoe32-0605-e1-mmlu: rjob_logs/hrmmoe32-0605-e1-mmlu_bench/summary.json.
+- 2026-06-05 23:29:58 HKT：Eval job hrmmoe32-0605-e1-std is Succeeded.
+- 2026-06-05 23:29:58 HKT：Loaded summary for hrmmoe32-0605-e1-std: rjob_logs/hrmmoe32-0605-e1-std_bench/summary.json.
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:end -->
