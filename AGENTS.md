@@ -466,6 +466,11 @@ python scripts/prepare_sft_data.py \
   put the local monitor state and tee log in a writable checkout such as
   `/mnt/shared-storage-user/quxiaoye/HRM-Text/rjob_logs/`, while keeping
   `fanout.output_dir` under the MoE worktree for container-written summaries.
+- Large checkpoint directories created by rjob containers may also be
+  root-owned. After MoE speed measurements are documented, clear disposable
+  speed-test checkpoints with a short CPU rjob that mounts `quxiaoye` and runs
+  exact-path `rm -rf`; do not rely on login-node deletion. Preserve active
+  long-run checkpoint paths such as `hrm-moe32g-sm16-06050339`.
 
 ## Local Validation
 

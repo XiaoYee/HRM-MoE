@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-05 09:49:07 HKT。
+最后更新：2026-06-05 11:43 HKT。
 
 ## 16 卡基线实验
 
@@ -706,6 +706,35 @@ GSM8k, MATH, DROP, MMLU, ARC, HellaSwag, Winogrande, BoolQ.
 - 当前训练数据是 sampled HRM/Data IO instruction-response PrefixLM 数据，不是
   针对评测测试集临时构造的一次性数据。
 - 后续所有训练、评测、失败尝试、清理动作和分析结论都用中文追加到本文档。
+
+## MoE speed checkpoint 清理：`hrm-moe-clean0605`
+
+2026-06-05 11:42 HKT，确认 64x8 MoE speed test 已测完后，清理
+`/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8/checkpoints` 下旧的
+bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjob
+容器 root-owned 文件报 `Permission denied`，改用短 CPU rjob
+`hrm-moe-clean0605` 在容器内删除。
+
+已删除的大目录包括：
+`hrm-moe64x8-triton-06042043`,
+`hrm-moe64x8-cutlass-06042057`,
+`hrm-moe64x8-bmm-e4s3-06042046`,
+`hrm-moe64x8-basic-bp2-06041908`,
+`hrm-moe64x8-shard-bp2-gb8192-e3s3-06041943`,
+`hrm-moe64x8-triton-06042038`,
+`hrm-moe64x8-triton-auto-*`,
+`hrm-moe64x8-triton-compile*`,
+`hrm-moe64x8-triton-bm64-06042208`,
+`hrm-moe64x8-triton-fsdp2-06042159`,
+`hrm-moe64x8-cutlass-bp2-gb8192-06042246`,
+`hrm-moe64x8-triton-sm16-*`,
+`hrm-dense-xl-bp2-gb8192-s3-06041939`,
+`hrm-dense-xl-bp2-gb8192-e3s3-06041941`。
+
+保留当前长跑 checkpoint
+`hrm-moe32g-sm16-06050339`；清理后 MoE worktree 的 `checkpoints/` 从约
+`2.4T` 降到约 `2.3M`，整个 `quxiaoye` 挂载从约 `97%` 使用率降到约
+`49%`，可用空间约 `7.8T`。
 
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:start -->
 ## 32 卡在线评测监控：`hrm-moe32g-sm16-06050339`
