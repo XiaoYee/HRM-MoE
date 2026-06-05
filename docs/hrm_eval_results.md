@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-05 21:53:43 HKT。
+最后更新：2026-06-05 21:58:47 HKT。
 
 ## 16 卡基线实验
 
@@ -739,7 +739,7 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:start -->
 ## 32 卡在线评测监控：`hrm-moe32g-sm16-06050339`
 
-最后刷新：2026-06-05 21:53:43 HKT。
+最后刷新：2026-06-05 21:58:47 HKT。
 
 | 项目 | 值 |
 | --- | --- |
@@ -753,7 +753,7 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 
 | Eval set | Epoch | Job | 状态 | Summary |
 | --- | --- | --- | --- | --- |
-| Standard | 1 | `hrmmoe32-0605-e1-std` | submitted | - |
+| Standard | 1 | `hrmmoe32-0605-e1-std` | running | - |
 | MMLU-Pro | 1 | `hrmmoe32-0605-e1-mmlu` | submitted | - |
 | AIME25 | 1 | `hrmmoe32-0605-e1-aime` | submitted | - |
 | Standard | 2 | `hrmmoe32-0605-e2-std` | waiting_checkpoint | - |
@@ -812,4 +812,7 @@ AIME25 Majority Voting（百分比）：
 - 2026-06-05 21:53:41 HKT：Submitted hrmmoe32-0605-e1-std for epoch 1 Standard.
 - 2026-06-05 21:53:42 HKT：Submitted hrmmoe32-0605-e1-mmlu for epoch 1 MMLU-Pro.
 - 2026-06-05 21:53:43 HKT：Submitted hrmmoe32-0605-e1-aime for epoch 1 AIME25.
+- 2026-06-05 21:58:45 HKT：Eval job hrmmoe32-0605-e1-aime is Unknown.
+- 2026-06-05 21:58:46 HKT：Eval job hrmmoe32-0605-e1-mmlu is Unknown.
+- 2026-06-05 21:58:47 HKT：Eval job hrmmoe32-0605-e1-std is Running.
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:end -->
