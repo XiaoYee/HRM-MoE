@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-05 22:13:58 HKT。
+最后更新：2026-06-05 23:24:51 HKT。
 
 ## 16 卡基线实验
 
@@ -739,7 +739,7 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:start -->
 ## 32 卡在线评测监控：`hrm-moe32g-sm16-06050339`
 
-最后刷新：2026-06-05 22:13:58 HKT。
+最后刷新：2026-06-05 23:24:51 HKT。
 
 | 项目 | 值 |
 | --- | --- |
@@ -754,8 +754,8 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 | Eval set | Epoch | Job | 状态 | Summary |
 | --- | --- | --- | --- | --- |
 | Standard | 1 | `hrmmoe32-0605-e1-std` | running | - |
-| MMLU-Pro | 1 | `hrmmoe32-0605-e1-mmlu` | running | - |
-| AIME25 | 1 | `hrmmoe32-0605-e1-aime` | submitted | - |
+| MMLU-Pro | 1 | `hrmmoe32-0605-e1-mmlu` | succeeded | `rjob_logs/hrmmoe32-0605-e1-mmlu_bench/summary.json` |
+| AIME25 | 1 | `hrmmoe32-0605-e1-aime` | running | - |
 | Standard | 2 | `hrmmoe32-0605-e2-std` | waiting_checkpoint | - |
 | MMLU-Pro | 2 | `hrmmoe32-0605-e2-mmlu` | waiting_checkpoint | - |
 | AIME25 | 2 | `hrmmoe32-0605-e2-aime` | waiting_checkpoint | - |
@@ -779,7 +779,7 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 | HellaSwag | acc | - | - | - | - |
 | Winogrande | acc | - | - | - | - |
 | BoolQ | acc | - | - | - | - |
-| MMLU-Pro | acc | - | - | - | - |
+| MMLU-Pro | acc | 20.79 | - | - | - |
 
 Invalid Rate（百分比）：
 
@@ -792,7 +792,7 @@ Invalid Rate（百分比）：
 | HellaSwag | - | - | - | - |
 | Winogrande | - | - | - | - |
 | BoolQ | - | - | - | - |
-| MMLU-Pro | - | - | - | - |
+| MMLU-Pro | 2.61 | - | - | - |
 
 AIME25 Majority Voting（百分比）：
 
@@ -806,7 +806,6 @@ AIME25 Majority Voting（百分比）：
 | pass@100 | - | - | - | - |
 
 最近运行记录：
-- 2026-06-05 09:45:29 HKT：Training job hrm-moe32g-sm16-06050339 is Running.
 - 2026-06-05 09:49:06 HKT：Monitor started.
 - 2026-06-05 21:53:40 HKT：Epoch 1 checkpoint is stable; submitting all eval sets.
 - 2026-06-05 21:53:41 HKT：Submitted hrmmoe32-0605-e1-std for epoch 1 Standard.
@@ -816,4 +815,7 @@ AIME25 Majority Voting（百分比）：
 - 2026-06-05 21:58:46 HKT：Eval job hrmmoe32-0605-e1-mmlu is Unknown.
 - 2026-06-05 21:58:47 HKT：Eval job hrmmoe32-0605-e1-std is Running.
 - 2026-06-05 22:13:57 HKT：Eval job hrmmoe32-0605-e1-mmlu is Running.
+- 2026-06-05 23:24:49 HKT：Eval job hrmmoe32-0605-e1-aime is Running.
+- 2026-06-05 23:24:50 HKT：Eval job hrmmoe32-0605-e1-mmlu is Succeeded.
+- 2026-06-05 23:24:51 HKT：Loaded summary for hrmmoe32-0605-e1-mmlu: rjob_logs/hrmmoe32-0605-e1-mmlu_bench/summary.json.
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:end -->
