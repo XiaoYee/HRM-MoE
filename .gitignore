@@ -7,6 +7,7 @@
 /local_data_prep_logs/
 /data_tokenized_bpe_65k/
 /data_sampled_*/
+/code_backups/
 # datasets
 /data/
 # checkpoints

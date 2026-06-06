@@ -736,6 +736,28 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 `2.4T` 降到约 `2.3M`，整个 `quxiaoye` 挂载从约 `97%` 使用率降到约
 `49%`，可用空间约 `7.8T`。
 
+## 初版 32 卡 MoE 代码快照
+
+2026-06-06 15:56 HKT，用户要求在后续切到加速版 MoE 前备份当前正在运行的
+初版 MoE 代码，方便后续比较效果是否对得上。
+
+| 项目 | 值 |
+| --- | --- |
+| 训练 Job | `hrm-moe32g-sm16-06050339` |
+| 当前训练进度 | `137490/304789`，总进度约 45.1%，epoch 2 内约 80.0% |
+| 当前速度 | 约 `1.05-1.08 s/it` |
+| 源 worktree | `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8` |
+| 源分支 | `codex/hrm-moe64x8` |
+| 备份 commit | `90b81a430a847fdb7239e04c5ce788d08da648fb` |
+| 备份 tag | `backup/moe-initial-hrm-moe32g-sm16-20260606-1556` |
+| 备份 branch | `backup/moe-initial-hrm-moe32g-sm16-20260606-1556` |
+| Archive | `code_backups/hrm-moe32g-sm16-initial-90b81a4-20260606-1556.tar.gz` |
+| Archive sha256 | `9ad02c968e592bd9f7fbfa6414032a8edf2a0bebaa985e066d268459f02fabd3` |
+
+该快照固定的是正在长跑的初版 `grouped_triton` MoE 代码，不包含 checkpoint、
+数据、W&B 和 rjob 日志。后续如果启动最快的 MoE 加速版，应把质量结果优先和
+这个快照对应的 `hrm-moe32g-sm16-06050339` 各 epoch 评测结果对齐比较。
+
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:start -->
 ## 32 卡在线评测监控：`hrm-moe32g-sm16-06050339`
 
