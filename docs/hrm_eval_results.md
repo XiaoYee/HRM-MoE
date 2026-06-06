@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-06 20:27:36 HKT。
+最后更新：2026-06-06 21:33:59 HKT。
 
 ## 16 卡基线实验
 
@@ -761,7 +761,7 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:start -->
 ## 32 卡在线评测监控：`hrm-moe32g-sm16-06050339`
 
-最后刷新：2026-06-06 20:27:36 HKT。
+最后刷新：2026-06-06 21:33:59 HKT。
 
 | 项目 | 值 |
 | --- | --- |
@@ -779,8 +779,8 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 | MMLU-Pro | 1 | `hrmmoe32-0605-e1-mmlu` | succeeded | `rjob_logs/hrmmoe32-0605-e1-mmlu_bench/summary.json` |
 | AIME25 | 1 | `hrmmoe32-0605-e1-aime` | succeeded | `rjob_logs/hrmmoe32-0605-e1-aime_bench/summary.json` |
 | Standard | 2 | `hrmmoe32-0605-e2-std` | running | - |
-| MMLU-Pro | 2 | `hrmmoe32-0605-e2-mmlu` | running | - |
-| AIME25 | 2 | `hrmmoe32-0605-e2-aime` | submitted | - |
+| MMLU-Pro | 2 | `hrmmoe32-0605-e2-mmlu` | succeeded | `rjob_logs/hrmmoe32-0605-e2-mmlu_bench/summary.json` |
+| AIME25 | 2 | `hrmmoe32-0605-e2-aime` | running | - |
 | Standard | 3 | `hrmmoe32-0605-e3-std` | waiting_checkpoint | - |
 | MMLU-Pro | 3 | `hrmmoe32-0605-e3-mmlu` | waiting_checkpoint | - |
 | AIME25 | 3 | `hrmmoe32-0605-e3-aime` | waiting_checkpoint | - |
@@ -801,7 +801,7 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 | HellaSwag | acc | 38.20 | - | - | - |
 | Winogrande | acc | 61.56 | - | - | - |
 | BoolQ | acc | 80.92 | - | - | - |
-| MMLU-Pro | acc | 20.79 | - | - | - |
+| MMLU-Pro | acc | 20.79 | 31.23 | - | - |
 
 Invalid Rate（百分比）：
 
@@ -814,7 +814,7 @@ Invalid Rate（百分比）：
 | HellaSwag | 0.00 | - | - | - |
 | Winogrande | 0.00 | - | - | - |
 | BoolQ | 0.00 | - | - | - |
-| MMLU-Pro | 2.61 | - | - | - |
+| MMLU-Pro | 2.61 | 2.30 | - | - |
 
 AIME25 Majority Voting（百分比）：
 
@@ -828,9 +828,6 @@ AIME25 Majority Voting（百分比）：
 | pass@100 | 34.90 | - | - | - |
 
 最近运行记录：
-- 2026-06-05 23:24:51 HKT：Loaded summary for hrmmoe32-0605-e1-mmlu: rjob_logs/hrmmoe32-0605-e1-mmlu_bench/summary.json.
-- 2026-06-05 23:29:58 HKT：Eval job hrmmoe32-0605-e1-std is Succeeded.
-- 2026-06-05 23:29:58 HKT：Loaded summary for hrmmoe32-0605-e1-std: rjob_logs/hrmmoe32-0605-e1-std_bench/summary.json.
 - 2026-06-06 01:51:45 HKT：Eval job hrmmoe32-0605-e1-aime is Succeeded.
 - 2026-06-06 01:51:47 HKT：Loaded summary for hrmmoe32-0605-e1-aime: rjob_logs/hrmmoe32-0605-e1-aime_bench/summary.json.
 - 2026-06-06 20:22:27 HKT：Epoch 2 checkpoint is stable; submitting all eval sets.
@@ -840,4 +837,7 @@ AIME25 Majority Voting（百分比）：
 - 2026-06-06 20:27:35 HKT：Eval job hrmmoe32-0605-e2-aime is Unknown.
 - 2026-06-06 20:27:35 HKT：Eval job hrmmoe32-0605-e2-mmlu is Running.
 - 2026-06-06 20:27:36 HKT：Eval job hrmmoe32-0605-e2-std is Running.
+- 2026-06-06 21:33:58 HKT：Eval job hrmmoe32-0605-e2-aime is Running.
+- 2026-06-06 21:33:58 HKT：Eval job hrmmoe32-0605-e2-mmlu is Succeeded.
+- 2026-06-06 21:33:59 HKT：Loaded summary for hrmmoe32-0605-e2-mmlu: rjob_logs/hrmmoe32-0605-e2-mmlu_bench/summary.json.
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:end -->
