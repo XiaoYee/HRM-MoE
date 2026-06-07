@@ -461,6 +461,15 @@ python scripts/prepare_sft_data.py \
   be reused from the main checkout with
   `HRM_MONITOR_REPO_DIR=/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8`
   so rjob evals launch from this worktree and write summaries/docs here.
+- When launching SFT from this MoE worktree, pass
+  `repo_dir=/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8` explicitly.
+  The copied `scripts/rjob_hrm_common.sh` still defaults to the dense checkout
+  path, and forgetting `repo_dir` can start SFT from code that does not match
+  the MoE checkpoint. For UltraData SFT, use
+  `scripts/local_ultradata_moe64_sft_after_prepare.sh` so the prepared HRM SFT
+  layout is header-validated before launch, `resume_epoch` is pinned to a
+  stable checkpoint with all 32 carry files, and SFT starts from EMA weights
+  with a fresh optimizer via `weights_only_resume_from_ema=true`.
 - This worktree's `rjob_logs/` may be root-owned because many MoE rjobs wrote
   logs from containers. If a local monitor cannot create its state/log there,
   put the local monitor state and tee log in a writable checkout such as

@@ -841,3 +841,45 @@ AIME25 Majority Voting（百分比）：
 - 2026-06-07 18:58:22 HKT：Eval job hrmmoe32-0605-e3-mmlu is Running.
 - 2026-06-07 18:58:23 HKT：Eval job hrmmoe32-0605-e3-std is Running.
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:end -->
+
+## UltraData SFT 接入 64x8 MoE
+
+2026-06-07 19:54 HKT，按用户要求准备在
+`openbmb/UltraData-SFT-2605` 下载和 HRM SFT 格式转换完成后，自动接上 32 卡
+64x8 MoE SFT。
+
+| 项目 | 值 |
+| --- | --- |
+| Watcher | `scripts/local_ultradata_moe64_sft_after_prepare.sh` |
+| 状态 | 已启动本地 watcher，等待 SFT 数据目录完成；下载仍在进行 |
+| tmux session | `hrm_moe64_ultradata_sft_after_prepare` |
+| watcher log | `/mnt/shared-storage-user/quxiaoye/HRM-Text/local_data_prep_logs/moe64_ultradata_sft_after_prepare_20260607_195551.log` |
+| marker 目录 | `/mnt/shared-storage-user/quxiaoye/HRM-Text/rjob_logs` |
+| SFT 数据目录 | `/mnt/shared-storage-user/quxiaoye/HRM-Text/data_ultradata_sft_2605_hrm_sft_e5_ctx4097` |
+| Raw 数据目录 | `/mnt/shared-storage-user/quxiaoye/HRM-Text/data_ultradata_sft_2605_raw` |
+| 训练 worktree | `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8` |
+| 预训练 checkpoint | `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8/checkpoints/hrm-moe32g-sm16-06050339` |
+| SFT 输出 checkpoint | `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8/checkpoints/hrm-moe64x8-ultradata-sft-0607` |
+| 计划 SFT job | `hrm-moe64-sft-ultra0607` |
+| 资源 | 32 张 H200，4 replicas x 8 GPUs |
+| 架构 | `arch_size=XL_moe64x8_grouped_triton` |
+| MoE 速度环境 | `HRM_MOE_TRITON_AUTOTUNE=1`, `HRM_MOE_TRITON_SM_MARGIN=16` |
+| SFT 超参 | `epochs=5`, `global_batch_size=32768`, `lr=3.0e-5`, `checkpoint_interval=1`, `compile_train_batch=false` |
+| Resume 策略 | watcher 自动选择最新稳定 epoch，要求 `.metadata` 和 32 个 `carry_epoch_<N>.<rank>.pt`；通过 `resume_epoch=<N>` 固定 |
+| EMA 策略 | `weights_only_resume_from_ema=true`，从 EMA 预训练权重开始并重置 optimizer |
+
+数据格式注意事项：
+
+- UltraData prepare 输出必须包含 `metadata.json`, `prepare_summary.json`,
+  `tokenizer.json`, `tokenizer_info.json`, `tokens.npy`, `inst_start.npy`,
+  `inst_len.npy`, `resp_start.npy`, `resp_len.npy`，以及 `epoch_0` 到
+  `epoch_4` 的四个 index array；`epochs=5` 必须和 SFT 配置一致。
+- `metadata.max_seq_len` 需要是 `4097`，`V1Dataset` 读取时会减 1，对齐 HRM
+  4096 上下文；样本长度在 prepare 阶段过滤为 `<4097`。
+- condition policy 使用 `auto`：`think` 数据映射到 `synth,cot`，`no_think`
+  数据映射到 `direct`；`tokenizer_info.condition_mapping` 必须含
+  `direct/synth/cot`。
+- 登录节点不直接 mmap 大型 `tokens.npy` 做校验；watcher 只读取 `.npy`
+  header 检查 dtype/shape，避免 GPFS 大文件 mmap 的 `No such device` 坑。
+- MoE SFT 必须显式传 `repo_dir=/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8`，
+  否则通用 rjob launcher 的默认 repo 会回到 dense checkout。
