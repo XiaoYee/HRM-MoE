@@ -470,6 +470,13 @@ python scripts/prepare_sft_data.py \
   layout is header-validated before launch, `resume_epoch` is pinned to a
   stable checkpoint with all 32 carry files, and SFT starts from EMA weights
   with a fresh optimizer via `weights_only_resume_from_ema=true`.
+- Keep UltraData MoE SFT monitors alive after rjob submission. The watcher must
+  inspect rjob state and final checkpoint artifacts until `fsdp2_epoch_5` plus
+  all 32 `carry_epoch_5.*.pt` files are stable; a successful submit command is
+  not enough. On failure, retry with suffixed job/checkpoint paths such as
+  `hrm-moe64-sft-ultra0607-r2` and
+  `checkpoints/hrm-moe64x8-ultradata-sft-0607-r2` so partial failed attempts do
+  not obscure the next run.
 - This worktree's `rjob_logs/` may be root-owned because many MoE rjobs wrote
   logs from containers. If a local monitor cannot create its state/log there,
   put the local monitor state and tee log in a writable checkout such as

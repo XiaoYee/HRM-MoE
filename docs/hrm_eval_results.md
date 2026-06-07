@@ -883,3 +883,22 @@ AIME25 Majority Voting（百分比）：
   header 检查 dtype/shape，避免 GPFS 大文件 mmap 的 `No such device` 坑。
 - MoE SFT 必须显式传 `repo_dir=/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8`，
   否则通用 rjob launcher 的默认 repo 会回到 dense checkout。
+
+### 2026-06-07 20:12 HKT 监控加固
+
+按用户要求，SFT watcher 不再只负责提交训练，而是提交后持续监控训练完成：
+
+- 新版 `scripts/local_ultradata_moe64_sft_after_prepare.sh` 会在提交后轮询
+  `rjob get job` 和 SFT checkpoint path。
+- 完成判定是 `fsdp2_epoch_5/.metadata` 存在，且 32 个
+  `carry_epoch_5.*.pt` 齐全并稳定；只看到 submit 成功或 rjob 状态
+  `Succeeded` 不算最终完成。
+- 失败后最多重试 3 次，重试 job 使用 `hrm-moe64-sft-ultra0607-r2/-r3`，
+  checkpoint path 使用
+  `checkpoints/hrm-moe64x8-ultradata-sft-0607-r2/-r3`，避免失败残留和新尝试混在一起。
+- watcher 已重启，tmux session 仍为
+  `hrm_moe64_ultradata_sft_after_prepare`，当前日志为
+  `/mnt/shared-storage-user/quxiaoye/HRM-Text/local_data_prep_logs/moe64_ultradata_sft_after_prepare_20260607_201103.log`。
+- 当前状态仍是等待 SFT 数据目录
+  `/mnt/shared-storage-user/quxiaoye/HRM-Text/data_ultradata_sft_2605_hrm_sft_e5_ctx4097`
+  生成；prepare 完成前不会启动 MoE SFT。
