@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-08 18:33:36 HKT。
+最后更新：2026-06-08 18:59:36 HKT。
 
 ## 16 卡基线实验
 
@@ -761,7 +761,7 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:start -->
 ## 32 卡在线评测监控：`hrm-moe32g-sm16-06050339`
 
-最后刷新：2026-06-08 18:33:36 HKT。
+最后刷新：2026-06-08 18:59:36 HKT。
 
 | 项目 | 值 |
 | --- | --- |
@@ -784,7 +784,7 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 | Standard | 3 | `hrmmoe32-0605-e3-std` | succeeded | `rjob_logs/hrmmoe32-0605-e3-std_bench/summary.json` |
 | MMLU-Pro | 3 | `hrmmoe32-0605-e3-mmlu` | succeeded | `rjob_logs/hrmmoe32-0605-e3-mmlu_bench/summary.json` |
 | AIME25 | 3 | `hrmmoe32-0605-e3-aime` | succeeded | `rjob_logs/hrmmoe32-0605-e3-aime_bench/summary.json` |
-| Standard | 4 | `hrmmoe32-0605-e4-std` | running | - |
+| Standard | 4 | `hrmmoe32-0605-e4-std` | succeeded | `rjob_logs/hrmmoe32-0605-e4-std_bench/summary.json` |
 | MMLU-Pro | 4 | `hrmmoe32-0605-e4-mmlu` | succeeded | `rjob_logs/hrmmoe32-0605-e4-mmlu_bench/summary.json` |
 | AIME25 | 4 | `hrmmoe32-0605-e4-aime` | running | - |
 
@@ -792,28 +792,28 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 
 | Benchmark | Metric | Epoch 1 | Epoch 2 | Epoch 3 | Epoch 4 |
 | --- | --- | --- | --- | --- | --- |
-| GSM8k | acc | 71.27 | 82.87 | 83.85 | - |
-| MATH | acc | 45.26 | 55.58 | 57.46 | - |
-| DROP | em | 67.85 | 78.32 | 80.18 | - |
-| DROP | f1 | 71.62 | 81.95 | 83.73 | - |
-| MMLU | acc | 49.64 | 58.70 | 60.57 | - |
-| ARC | acc | 63.63 | 82.68 | 84.64 | - |
-| HellaSwag | acc | 38.20 | 63.78 | 70.16 | - |
-| Winogrande | acc | 61.56 | 69.38 | 73.01 | - |
-| BoolQ | acc | 80.92 | 86.61 | 87.71 | - |
+| GSM8k | acc | 71.27 | 82.87 | 83.85 | 84.99 |
+| MATH | acc | 45.26 | 55.58 | 57.46 | 60.08 |
+| DROP | em | 67.85 | 78.32 | 80.18 | 80.86 |
+| DROP | f1 | 71.62 | 81.95 | 83.73 | 84.53 |
+| MMLU | acc | 49.64 | 58.70 | 60.57 | 61.18 |
+| ARC | acc | 63.63 | 82.68 | 84.64 | 87.80 |
+| HellaSwag | acc | 38.20 | 63.78 | 70.16 | 73.89 |
+| Winogrande | acc | 61.56 | 69.38 | 73.01 | 73.88 |
+| BoolQ | acc | 80.92 | 86.61 | 87.71 | 88.75 |
 | MMLU-Pro | acc | 20.79 | 31.23 | 33.87 | 37.57 |
 
 Invalid Rate（百分比）：
 
 | Benchmark | Epoch 1 | Epoch 2 | Epoch 3 | Epoch 4 |
 | --- | --- | --- | --- | --- |
-| GSM8k | 1.36 | 0.53 | 0.99 | - |
-| MATH | 7.06 | 4.44 | 4.34 | - |
-| MMLU | 0.25 | 0.18 | 0.45 | - |
-| ARC | 0.26 | 0.00 | 0.00 | - |
-| HellaSwag | 0.00 | 0.00 | 0.00 | - |
-| Winogrande | 0.00 | 0.00 | 0.00 | - |
-| BoolQ | 0.00 | 0.00 | 0.00 | - |
+| GSM8k | 1.36 | 0.53 | 0.99 | 1.06 |
+| MATH | 7.06 | 4.44 | 4.34 | 3.52 |
+| MMLU | 0.25 | 0.18 | 0.45 | 0.70 |
+| ARC | 0.26 | 0.00 | 0.00 | 0.00 |
+| HellaSwag | 0.00 | 0.00 | 0.00 | 0.00 |
+| Winogrande | 0.00 | 0.00 | 0.00 | 0.00 |
+| BoolQ | 0.00 | 0.00 | 0.00 | 0.00 |
 | MMLU-Pro | 2.61 | 2.30 | 1.37 | 1.57 |
 
 AIME25 Majority Voting（百分比）：
@@ -828,8 +828,6 @@ AIME25 Majority Voting（百分比）：
 | pass@100 | 34.90 | 37.96 | 38.01 | - |
 
 最近运行记录：
-- 2026-06-08 17:25:46 HKT：Epoch 4 checkpoint is stable; submitting all eval sets.
-- 2026-06-08 17:25:47 HKT：Submitted hrmmoe32-0605-e4-std for epoch 4 Standard.
 - 2026-06-08 17:25:48 HKT：Submitted hrmmoe32-0605-e4-mmlu for epoch 4 MMLU-Pro.
 - 2026-06-08 17:25:49 HKT：Submitted hrmmoe32-0605-e4-aime for epoch 4 AIME25.
 - 2026-06-08 17:31:00 HKT：Eval job hrmmoe32-0605-e4-aime is Unknown.
@@ -840,6 +838,8 @@ AIME25 Majority Voting（百分比）：
 - 2026-06-08 17:46:40 HKT：Eval job hrmmoe32-0605-e4-aime is Running.
 - 2026-06-08 18:33:35 HKT：Eval job hrmmoe32-0605-e4-mmlu is Succeeded.
 - 2026-06-08 18:33:36 HKT：Loaded summary for hrmmoe32-0605-e4-mmlu: rjob_logs/hrmmoe32-0605-e4-mmlu_bench/summary.json.
+- 2026-06-08 18:59:36 HKT：Eval job hrmmoe32-0605-e4-std is Succeeded.
+- 2026-06-08 18:59:36 HKT：Loaded summary for hrmmoe32-0605-e4-std: rjob_logs/hrmmoe32-0605-e4-std_bench/summary.json.
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:end -->
 
 ## UltraData SFT 接入 64x8 MoE
