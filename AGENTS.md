@@ -484,6 +484,14 @@ python scripts/prepare_sft_data.py \
   rjob `Succeeded` false positive with zero training steps and valid-looking
   checkpoints. Use at least `global_batch_size=131072` for 32 cards, and keep
   the `pretrain.py`/watcher local-batch guard in place.
+- If `max_steps` is used to probe a faster UltraData MoE SFT batch size, keep
+  it in an explicitly isolated probe job/checkpoint path and stop/delete it
+  after the gate. Never carry `max_steps` into the formal SFT launch unless the
+  user explicitly asks for a shortened run. The 2026-06-08 formal 32-card r4
+  launch used `global_batch_size=262144`, `epochs=5`, and no `max_steps`; this
+  halves total optimizer steps versus `131072` while preserving the requested
+  five-epoch data pass, but still changes the effective batch-size/optimization
+  tradeoff.
 - Keep UltraData MoE SFT monitors alive after rjob submission. The watcher must
   inspect rjob state and final checkpoint artifacts until `fsdp2_epoch_5` plus
   all 32 `carry_epoch_5.*.pt` files are stable; a successful submit command is

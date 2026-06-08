@@ -970,3 +970,22 @@ AIME25 Majority Voting（百分比）：
   `40/425355`，确认已产生真实训练 step；输出目录已写出
   `all_config.yaml`、`train_metadata.yaml` 和模型源码快照，尚未到第一个 epoch
   checkpoint。
+
+### 2026-06-08 19:35 HKT SFT 加速与 probe 隔离
+
+- 因用户反馈 `hrm-moe64-sft-ultra0608-e4-r3` 太慢，已停止 r3 以释放 32 卡资源并重新
+  调整速度参数；r3 当时已确认有真实 step，但未作为最终 SFT 结果继续。
+- 提交过一次独立测速/OOM probe：`hrm-moe64-sft-bs262k-probe`，只用于验证
+  `global_batch_size=262144` 的可运行性，带 `max_steps=100`，checkpoint path 也使用
+  单独的 `hrm-moe64x8-ultradata-sft-bs262k-probe`。用户确认不希望任何截断影响正式训
+  练后，已立即 `rjob stop --force`，19:33 HKT `rjob get` 确认该 probe 为 `Stopped`；
+  probe 不作为训练结果使用。
+- 正式重启任务为 `hrm-moe64-sft-ultra0608-e4-r4`，checkpoint path 为
+  `checkpoints/hrm-moe64x8-ultradata-sft-e4-0608-r4`。启动命令包含
+  `epochs=5`、`global_batch_size=262144`、`+resume_epoch=4`、
+  `weights_only_resume_from_ema=true`，不包含 `max_steps`，因此不会只跑 100 step 截断。
+- 19:33 HKT `rjob get` 显示 r4 的 4 个 8 卡 replica 均为 `Running`；日志
+  `rjob_logs/sft_0_0_20260608_113143.log` 显示进度从 `0/212677` 推进到
+  `130/212677`，暂无 `Traceback`、OOM 或 `max_steps` 字样。早期 tqdm ETA 约 70 小时
+  量级；这是 batch 翻倍后将总 step 从 r3 的 `425355` 降到 `212677`，不是减少 epoch
+  或截断数据。
