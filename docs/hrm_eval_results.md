@@ -851,7 +851,7 @@ AIME25 Majority Voting（百分比）：
 | 项目 | 值 |
 | --- | --- |
 | Watcher | `scripts/local_ultradata_moe64_sft_after_prepare.sh` |
-| 状态 | SFT r2 判定为空跑无效；SFT r3 已按 32 卡可行 batch 重新提交 |
+| 状态 | SFT r2 判定为空跑无效；SFT r3 已运行并确认有真实训练 step |
 | tmux session | `hrm_moe64_ultradata_sft_after_prepare` |
 | watcher log | `/mnt/shared-storage-user/quxiaoye/HRM-Text/local_data_prep_logs/moe64_ultradata_sft_after_prepare_20260607_195551.log` |
 | marker 目录 | `/mnt/shared-storage-user/quxiaoye/HRM-Text/rjob_logs` |
@@ -964,3 +964,9 @@ AIME25 Majority Voting（百分比）：
   已重新提交 `hrm-moe64-sft-ultra0608-e4-r3`，checkpoint path 为
   `checkpoints/hrm-moe64x8-ultradata-sft-e4-0608-r3`。19:08:30 HKT 状态为
   `STARTING`/Inqueue，等待 4 replicas x 8 GPUs gang 资源。
+- 19:09:53 HKT，`hrm-moe64-sft-ultra0608-e4-r3` 已拿到 4 replicas x 8 GPUs 并进入
+  `Running`，节点为 `0199/0449/0444/0422`。19:11 HKT 查看
+  `rjob_logs/sft_0_0_20260608_110924.log`，进度条从 `0/425355` 推进到
+  `40/425355`，确认已产生真实训练 step；输出目录已写出
+  `all_config.yaml`、`train_metadata.yaml` 和模型源码快照，尚未到第一个 epoch
+  checkpoint。
