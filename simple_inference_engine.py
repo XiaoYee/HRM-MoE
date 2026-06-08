@@ -217,7 +217,7 @@ def inference_load_hf_checkpoint(
 
     model_cls = load_model_class("baselines.hrm_nocarry_bp_warmup@HierarchicalReasoningModel")
     head_cls = load_model_class("lm_head@LMHead")
-    with torch.device("meta"):
+    with torch.device("cpu"):
         model: nn.Module = model_cls(native_cfg)
         model = head_cls(model, native_cfg)
 
