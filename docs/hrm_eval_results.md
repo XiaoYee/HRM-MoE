@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-08 18:59:36 HKT。
+最后更新：2026-06-08 19:51:36 HKT。
 
 ## 16 卡基线实验
 
@@ -761,7 +761,7 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:start -->
 ## 32 卡在线评测监控：`hrm-moe32g-sm16-06050339`
 
-最后刷新：2026-06-08 18:59:36 HKT。
+最后刷新：2026-06-08 19:51:36 HKT。
 
 | 项目 | 值 |
 | --- | --- |
@@ -786,7 +786,7 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 | AIME25 | 3 | `hrmmoe32-0605-e3-aime` | succeeded | `rjob_logs/hrmmoe32-0605-e3-aime_bench/summary.json` |
 | Standard | 4 | `hrmmoe32-0605-e4-std` | succeeded | `rjob_logs/hrmmoe32-0605-e4-std_bench/summary.json` |
 | MMLU-Pro | 4 | `hrmmoe32-0605-e4-mmlu` | succeeded | `rjob_logs/hrmmoe32-0605-e4-mmlu_bench/summary.json` |
-| AIME25 | 4 | `hrmmoe32-0605-e4-aime` | running | - |
+| AIME25 | 4 | `hrmmoe32-0605-e4-aime` | succeeded | `rjob_logs/hrmmoe32-0605-e4-aime_bench/summary.json` |
 
 主指标（百分比）：
 
@@ -820,16 +820,14 @@ AIME25 Majority Voting（百分比）：
 
 | Metric | Epoch 1 | Epoch 2 | Epoch 3 | Epoch 4 |
 | --- | --- | --- | --- | --- |
-| maj_pass@1 | 0.00 | 10.00 | 16.67 | - |
-| maj_pass@10 | 23.33 | 26.67 | 33.33 | - |
-| maj_pass@100 | 43.33 | 50.00 | 43.33 | - |
-| pass@1 | 0.86 | 3.59 | 4.08 | - |
-| pass@10 | 7.68 | 16.29 | 18.07 | - |
-| pass@100 | 34.90 | 37.96 | 38.01 | - |
+| maj_pass@1 | 0.00 | 10.00 | 16.67 | 16.67 |
+| maj_pass@10 | 23.33 | 26.67 | 33.33 | 36.67 |
+| maj_pass@100 | 43.33 | 50.00 | 43.33 | 56.67 |
+| pass@1 | 0.86 | 3.59 | 4.08 | 5.42 |
+| pass@10 | 7.68 | 16.29 | 18.07 | 20.44 |
+| pass@100 | 34.90 | 37.96 | 38.01 | 45.17 |
 
 最近运行记录：
-- 2026-06-08 17:25:48 HKT：Submitted hrmmoe32-0605-e4-mmlu for epoch 4 MMLU-Pro.
-- 2026-06-08 17:25:49 HKT：Submitted hrmmoe32-0605-e4-aime for epoch 4 AIME25.
 - 2026-06-08 17:31:00 HKT：Eval job hrmmoe32-0605-e4-aime is Unknown.
 - 2026-06-08 17:31:01 HKT：Eval job hrmmoe32-0605-e4-mmlu is Running.
 - 2026-06-08 17:31:02 HKT：Eval job hrmmoe32-0605-e4-std is Running.
@@ -840,6 +838,8 @@ AIME25 Majority Voting（百分比）：
 - 2026-06-08 18:33:36 HKT：Loaded summary for hrmmoe32-0605-e4-mmlu: rjob_logs/hrmmoe32-0605-e4-mmlu_bench/summary.json.
 - 2026-06-08 18:59:36 HKT：Eval job hrmmoe32-0605-e4-std is Succeeded.
 - 2026-06-08 18:59:36 HKT：Loaded summary for hrmmoe32-0605-e4-std: rjob_logs/hrmmoe32-0605-e4-std_bench/summary.json.
+- 2026-06-08 19:51:34 HKT：Eval job hrmmoe32-0605-e4-aime is Succeeded.
+- 2026-06-08 19:51:36 HKT：Loaded summary for hrmmoe32-0605-e4-aime: rjob_logs/hrmmoe32-0605-e4-aime_bench/summary.json.
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:end -->
 
 ## UltraData SFT 接入 64x8 MoE
