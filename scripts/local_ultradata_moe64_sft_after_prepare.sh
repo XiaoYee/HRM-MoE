@@ -10,7 +10,7 @@ num_gpus="${SFT_NUM_GPUS:-32}"
 arch_size="${SFT_ARCH_SIZE:-XL_moe64x8_grouped_triton}"
 epochs="${SFT_EPOCHS:-5}"
 target_resume_epoch="${SFT_RESUME_EPOCH:-4}"
-global_batch_size="${SFT_GLOBAL_BATCH_SIZE:-32768}"
+global_batch_size="${SFT_GLOBAL_BATCH_SIZE:-131072}"
 required_carry_count="${REQUIRED_CARRY_COUNT:-32}"
 poll_seconds="${POLL_SECONDS:-300}"
 stability_seconds="${STABILITY_SECONDS:-30}"
@@ -58,7 +58,7 @@ job_state() {
 
 validate_sft_data() {
   local path="$1"
-  python - "${path}" "${epochs}" <<'PY'
+  python - "${path}" "${epochs}" "${global_batch_size}" "${num_gpus}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -66,6 +66,8 @@ from numpy.lib import format as npy_format
 
 path = Path(sys.argv[1])
 epochs = int(sys.argv[2])
+global_batch_size = int(sys.argv[3])
+num_gpus = int(sys.argv[4])
 
 def npy_header(file: Path):
     with file.open("rb") as handle:
@@ -98,6 +100,16 @@ if metadata.get("max_seq_len") != 4097:
     raise SystemExit(f"unexpected_max_seq_len={metadata.get('max_seq_len')!r}")
 if metadata.get("num_samples") != summary.get("num_samples"):
     raise SystemExit("metadata/summary num_samples mismatch")
+local_batch_size = global_batch_size // num_gpus
+required_local_batch_size = int(metadata["max_seq_len"]) - 1
+if global_batch_size % num_gpus != 0:
+    raise SystemExit(f"global_batch_size_not_divisible global_batch_size={global_batch_size} num_gpus={num_gpus}")
+if local_batch_size < required_local_batch_size:
+    raise SystemExit(
+        "local_batch_too_small "
+        f"global_batch_size={global_batch_size} num_gpus={num_gpus} "
+        f"local_batch_size={local_batch_size} required_local_batch_size={required_local_batch_size}"
+    )
 
 condition_mapping = tokenizer_info.get("condition_mapping") or {}
 for key in ("direct", "synth", "cot"):
@@ -131,6 +143,7 @@ print(
     f"samples={metadata.get('num_samples')} "
     f"tokens={metadata.get('num_tokens')} "
     f"max_sample_len={metadata.get('max_sample_len')} "
+    f"local_batch_size={local_batch_size} "
     f"skipped_long={summary.get('skipped_long')}"
 )
 PY

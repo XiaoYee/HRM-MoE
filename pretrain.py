@@ -193,6 +193,12 @@ def init_train(config: PretrainConfig, rank: int, world_size: int):
 
     # Dataset
     train_loader, train_metadata = create_dataloader(config, local_batch_size, drop_last_batch=True,  rank=rank, world_size=world_size)
+    if local_batch_size < train_metadata.max_seq_len:
+        raise ValueError(
+            f"Local batch token budget {local_batch_size} is smaller than dataset max_seq_len "
+            f"{train_metadata.max_seq_len}. Increase global_batch_size to at least "
+            f"{train_metadata.max_seq_len * world_size} for world_size={world_size}."
+        )
 
     # Model
     model, carry, optim = create_model_and_carry(config, train_metadata, local_batch_size)
@@ -202,6 +208,12 @@ def init_train(config: PretrainConfig, rank: int, world_size: int):
     total_steps = int(config.epochs * train_metadata.total_length // config.global_batch_size)
     if config.max_steps is not None:
         total_steps = min(total_steps, config.max_steps)
+    if total_steps <= 0:
+        raise ValueError(
+            f"No training steps would be produced: total_length={train_metadata.total_length}, "
+            f"epochs={config.epochs}, global_batch_size={config.global_batch_size}, "
+            f"max_steps={config.max_steps}."
+        )
     train_state = TrainState(
         model=model,
         carry=carry,

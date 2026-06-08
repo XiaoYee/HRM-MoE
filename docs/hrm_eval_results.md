@@ -851,7 +851,7 @@ AIME25 Majority Voting（百分比）：
 | 项目 | 值 |
 | --- | --- |
 | Watcher | `scripts/local_ultradata_moe64_sft_after_prepare.sh` |
-| 状态 | SFT r2 已修复并重新提交；当前等待 32 卡 gang 资源 |
+| 状态 | SFT r2 判定为空跑无效；SFT r3 已按 32 卡可行 batch 重新提交 |
 | tmux session | `hrm_moe64_ultradata_sft_after_prepare` |
 | watcher log | `/mnt/shared-storage-user/quxiaoye/HRM-Text/local_data_prep_logs/moe64_ultradata_sft_after_prepare_20260607_195551.log` |
 | marker 目录 | `/mnt/shared-storage-user/quxiaoye/HRM-Text/rjob_logs` |
@@ -859,12 +859,12 @@ AIME25 Majority Voting（百分比）：
 | Raw 数据目录 | `/mnt/shared-storage-user/quxiaoye/HRM-Text/data_ultradata_sft_2605_raw` |
 | 训练 worktree | `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8` |
 | 预训练 checkpoint | `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8/checkpoints/hrm-moe32g-sm16-06050339` |
-| SFT 输出 checkpoint | `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8/checkpoints/hrm-moe64x8-ultradata-sft-e4-0608-r2` |
-| 当前 SFT job | `hrm-moe64-sft-ultra0608-e4-r2` |
+| SFT 输出 checkpoint | `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8/checkpoints/hrm-moe64x8-ultradata-sft-e4-0608-r3` |
+| 当前 SFT job | `hrm-moe64-sft-ultra0608-e4-r3` |
 | 资源 | 32 张 H200，4 replicas x 8 GPUs |
 | 架构 | `arch_size=XL_moe64x8_grouped_triton` |
 | MoE 速度环境 | `HRM_MOE_TRITON_AUTOTUNE=1`, `HRM_MOE_TRITON_SM_MARGIN=16` |
-| SFT 超参 | `epochs=5`, `global_batch_size=32768`, `lr=3.0e-5`, `checkpoint_interval=1`, `compile_train_batch=false` |
+| SFT 超参 | `epochs=5`, `global_batch_size=131072`, `lr=3.0e-5`, `checkpoint_interval=1`, `compile_train_batch=false` |
 | Resume 策略 | watcher 固定等待 `SFT_RESUME_EPOCH=4`，要求 `.metadata` 和 32 个 `carry_epoch_4.<rank>.pt` 稳定后才提交 |
 | EMA 策略 | `weights_only_resume_from_ema=true`，从 EMA 预训练权重开始并重置 optimizer |
 
@@ -945,3 +945,22 @@ AIME25 Majority Voting（百分比）：
   `hrm-moe64-sft-ultra0608-e4-r2`。17:45:52 HKT 状态仍为
   `STARTING`/Inqueue，事件显示 `4 Pending, 4 minAvailable; Pending: 4
   Unschedulable`，即等待 32 卡 gang 资源；此时容器尚未启动，暂无新的训练日志。
+
+### 2026-06-08 19:08 HKT SFT r2 空跑与 r3 重提
+
+- 19:05 HKT 复查 `hrm-moe64-sft-ultra0608-e4-r2`，rjob 显示 `Succeeded`，
+  但最新日志 `rjob_logs/sft_0_0_20260608_105713.log` 只有 resume 和
+  `Epoch 1` 到 `Epoch 5` 打印，进度条停在 `0/1701421`，没有任何 loss/metrics；
+  checkpoint 目录虽写出约 404G 和 32 个 `carry_epoch_5.*.pt`，但判定为空跑无效。
+- 根因是 32 卡下 `global_batch_size=32768` 会变成每卡 `1024` tokens，而 UltraData
+  SFT 数据 `metadata.max_seq_len=4097`，`V1Dataset` 右移后需要每卡至少
+  `4096` tokens。首批样本无法装入每卡 batch，`MultipackDistributedBatchSampler`
+  不 yield batch，训练循环仍按 epoch 保存 checkpoint，形成假成功。
+- 已在 `pretrain.py` 加运行时保护：`local_batch_size < train_metadata.max_seq_len`
+  或 `total_steps <= 0` 时直接报错；已在
+  `scripts/local_ultradata_moe64_sft_after_prepare.sh` 提交前校验
+  `global_batch_size / num_gpus >= metadata.max_seq_len - 1`。
+- watcher 默认 `SFT_GLOBAL_BATCH_SIZE` 从 `32768` 改为 `131072`；19:08:20 HKT
+  已重新提交 `hrm-moe64-sft-ultra0608-e4-r3`，checkpoint path 为
+  `checkpoints/hrm-moe64x8-ultradata-sft-e4-0608-r3`。19:08:30 HKT 状态为
+  `STARTING`/Inqueue，等待 4 replicas x 8 GPUs gang 资源。

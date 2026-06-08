@@ -477,6 +477,13 @@ python scripts/prepare_sft_data.py \
   watcher passes it through `extra_args`, use the append form
   `+resume_epoch=<N>`; plain `resume_epoch=<N>` makes all training replicas
   fail during config composition before any real SFT work starts.
+- For 32-card UltraData MoE SFT, do not reuse the 8-card
+  `global_batch_size=32768`. HRM interprets this as total tokens, so 32 cards
+  gives only 1024 tokens per rank while the prepared UltraData SFT samples
+  require up to 4096 tokens after the autoregressive shift. That can produce an
+  rjob `Succeeded` false positive with zero training steps and valid-looking
+  checkpoints. Use at least `global_batch_size=131072` for 32 cards, and keep
+  the `pretrain.py`/watcher local-batch guard in place.
 - Keep UltraData MoE SFT monitors alive after rjob submission. The watcher must
   inspect rjob state and final checkpoint artifacts until `fsdp2_epoch_5` plus
   all 32 `carry_epoch_5.*.pt` files are stable; a successful submit command is
