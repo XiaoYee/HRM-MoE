@@ -241,6 +241,22 @@ Sizes live under [`config/arch/size`](config/arch/size):
 
 For HRM and RINS, `half_layers: true` splits the configured layer count evenly between the H and L modules.
 
+Optional sparse MoE size presets live in the same directory:
+
+| Config | Layers | Hidden | Heads | Experts | Active FFN width |
+| --- | ---: | ---: | ---: | --- | ---: |
+| `XL_moe64x8` | 32 | 1536 | 12 | 64 SwiGLU experts, top-k 8, expert width 512 | `8 * 512 = 4096` |
+
+The MoE preset keeps the per-token active FFN width aligned with dense `XL`
+while increasing total expert capacity. It uses fp32 router softmax, normalized
+top-k routing, and an auxiliary load-balancing loss. Launch it by overriding the
+size config:
+
+```bash
+torchrun --nproc_per_node=8 pretrain.py \
+  arch/size@arch=XL_moe64x8
+```
+
 ## Repository Layout
 
 ```text
@@ -262,7 +278,7 @@ HRM-Text/
 - [`dataset_new.py`](dataset_new.py) loads sampled `tokens.npy` and per-epoch index arrays, builds PrefixLM batches, masks instruction tokens by default, and emits FlashAttention sequence metadata.
 - [`multipack_sampler.py`](multipack_sampler.py) implements distributed multipack batching with LPT allocation to improve token-slot utilization and balance quadratic attention work.
 - [`models/flash_attention_prefixlm_v2.py`](models/flash_attention_prefixlm_v2.py) implements the two-pass PrefixLM attention path: one bidirectional pass over the prefix region and one causal pass over the response region.
-- [`models/layers.py`](models/layers.py) contains RoPE, gated multi-head attention, SwiGLU MLPs, static KV cache helpers, and initialization utilities.
+- [`models/layers.py`](models/layers.py) contains RoPE, gated multi-head attention, dense SwiGLU MLPs, optional sparse MoE SwiGLU MLPs, static KV cache helpers, and initialization utilities.
 - [`models/baselines/hrm_nocarry_bp_warmup.py`](models/baselines/hrm_nocarry_bp_warmup.py) contains the main HRM-Text architecture.
 - [`models/lm_head.py`](models/lm_head.py) attaches scaled embeddings, the output head, cross-entropy loss, token accuracy, and sequence exact accuracy.
 - [`pretrain.py`](pretrain.py) handles FSDP2 wrapping, optimizer creation, LR schedule, W&B logging, code/config snapshots, and distributed checkpointing.
