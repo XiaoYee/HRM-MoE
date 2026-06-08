@@ -851,7 +851,7 @@ AIME25 Majority Voting（百分比）：
 | 项目 | 值 |
 | --- | --- |
 | Watcher | `scripts/local_ultradata_moe64_sft_after_prepare.sh` |
-| 状态 | 已启动本地 watcher，等待 SFT 数据目录完成；下载仍在进行 |
+| 状态 | SFT r2 已修复并重新提交；当前等待 32 卡 gang 资源 |
 | tmux session | `hrm_moe64_ultradata_sft_after_prepare` |
 | watcher log | `/mnt/shared-storage-user/quxiaoye/HRM-Text/local_data_prep_logs/moe64_ultradata_sft_after_prepare_20260607_195551.log` |
 | marker 目录 | `/mnt/shared-storage-user/quxiaoye/HRM-Text/rjob_logs` |
@@ -859,8 +859,8 @@ AIME25 Majority Voting（百分比）：
 | Raw 数据目录 | `/mnt/shared-storage-user/quxiaoye/HRM-Text/data_ultradata_sft_2605_raw` |
 | 训练 worktree | `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8` |
 | 预训练 checkpoint | `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8/checkpoints/hrm-moe32g-sm16-06050339` |
-| SFT 输出 checkpoint | `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8/checkpoints/hrm-moe64x8-ultradata-sft-e4-0608` |
-| 计划 SFT job | `hrm-moe64-sft-ultra0608-e4` |
+| SFT 输出 checkpoint | `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8/checkpoints/hrm-moe64x8-ultradata-sft-e4-0608-r2` |
+| 当前 SFT job | `hrm-moe64-sft-ultra0608-e4-r2` |
 | 资源 | 32 张 H200，4 replicas x 8 GPUs |
 | 架构 | `arch_size=XL_moe64x8_grouped_triton` |
 | MoE 速度环境 | `HRM_MOE_TRITON_AUTOTUNE=1`, `HRM_MOE_TRITON_SM_MARGIN=16` |
@@ -920,7 +920,7 @@ AIME25 Majority Voting（百分比）：
   `SFT_JOB_NAME=hrm-moe64-sft-ultra0608-e4`，
   `SFT_CHECKPOINT_PATH=/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8/checkpoints/hrm-moe64x8-ultradata-sft-e4-0608`。
 
-### 2026-06-08 17:37 HKT SFT 让路与启动
+### 2026-06-08 17:47 HKT AIME 重启与 SFT r2 修复
 
 - epoch4 checkpoint 已完成后，评测 watcher 提交了 Standard/MMLU-Pro/AIME25 三个
   8 卡 eval；为优先启动线上 UltraData SFT，手动停止
@@ -930,5 +930,18 @@ AIME25 Majority Voting（百分比）：
 - SFT 首次 job `hrm-moe64-sft-ultra0608-e4` 四个 replica 失败，watcher 自动提交
   `hrm-moe64-sft-ultra0608-e4-r2`，checkpoint path 为
   `checkpoints/hrm-moe64x8-ultradata-sft-e4-0608-r2`。
-- 17:37 HKT，`hrm-moe64-sft-ultra0608-e4-r2` 已拿到 4 replicas x 8 GPUs 并进入
-  `Running`。epoch4 AIME25 评测暂缓，后续需要手动重跑。
+- `hrm-moe64-sft-ultra0608-e4-r2` 随后失败，根因是 launcher 通过
+  `extra_args` 传了 `resume_epoch=4`，Hydra 严格配置报错：
+  `Could not override 'resume_epoch'. To append to your config use +resume_epoch=4`。
+- 已修复 `scripts/local_ultradata_moe64_sft_after_prepare.sh`，将 SFT 的
+  `extra_args` 改为 `+resume_epoch=${resume_epoch}`，并用 `bash -n` 和
+  rjob dry-run 确认 `HRM_EXTRA_ARGS` 里包含 `+resume_epoch=4`，`HRM_REPO_DIR`
+  与容器 `cd` 都指向
+  `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8`。
+- 按用户新指令，17:43:48 HKT 重新提交 `hrmmoe32-0605-e4-aime`，17:45:52 HKT
+  确认已 `Running`。
+- 同时删除失败的 `hrm-moe64-sft-ultra0608-e4-r2` 和误提交的
+  `hrm-moe64-sft-ultra0608-e4-r3` 后，17:43:49 HKT 以同名重新提交修复后的
+  `hrm-moe64-sft-ultra0608-e4-r2`。17:45:52 HKT 状态仍为
+  `STARTING`/Inqueue，事件显示 `4 Pending, 4 minAvailable; Pending: 4
+  Unschedulable`，即等待 32 卡 gang 资源；此时容器尚未启动，暂无新的训练日志。

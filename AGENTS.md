@@ -473,6 +473,10 @@ python scripts/prepare_sft_data.py \
   For the UltraData MoE64 SFT run, do not start from the currently latest
   checkpoint if it is only epoch 3; set `SFT_RESUME_EPOCH=4` and wait for
   `hrm-moe32g-sm16-06050339/fsdp2_epoch_4` to become stable.
+- `resume_epoch` is not declared in the Hydra config schema. When the MoE SFT
+  watcher passes it through `extra_args`, use the append form
+  `+resume_epoch=<N>`; plain `resume_epoch=<N>` makes all training replicas
+  fail during config composition before any real SFT work starts.
 - Keep UltraData MoE SFT monitors alive after rjob submission. The watcher must
   inspect rjob state and final checkpoint artifacts until `fsdp2_epoch_5` plus
   all 32 `carry_epoch_5.*.pt` files are stable; a successful submit command is
@@ -480,6 +484,11 @@ python scripts/prepare_sft_data.py \
   `hrm-moe64-sft-ultra0607-r2` and
   `checkpoints/hrm-moe64x8-ultradata-sft-0607-r2` so partial failed attempts do
   not obscure the next run.
+- If an eval rjob must be interrupted to free GPUs for SFT, use
+  `rjob stop <job_name>` first and `rjob stop --force <job_name>` if the job
+  still appears active. `rjob get` can lag after the pod is deleted; check
+  `rjob events <job_name>` for `Deleted pod` and wait for `rjob get` to show
+  `Stopped` before assuming the GPU has been released.
 - This worktree's `rjob_logs/` may be root-owned because many MoE rjobs wrote
   logs from containers. If a local monitor cannot create its state/log there,
   put the local monitor state and tee log in a writable checkout such as

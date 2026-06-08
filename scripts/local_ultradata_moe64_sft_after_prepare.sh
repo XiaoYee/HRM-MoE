@@ -267,7 +267,7 @@ submit_sft() {
 
   cd "${repo_dir}"
   local extra_args
-  extra_args="epochs=${epochs} checkpoint_interval=1 log_interval=5 compile_train_batch=false fsdp_wrap_moe_experts=true allow_compile_moe=false resume_epoch=${resume_epoch}"
+  extra_args="epochs=${epochs} checkpoint_interval=1 log_interval=5 compile_train_batch=false fsdp_wrap_moe_experts=true allow_compile_moe=false +resume_epoch=${resume_epoch}"
 
   log "dry_run job=${name} resume_epoch=${resume_epoch} checkpoint_path=${attempt_checkpoint_path}"
   dry_run=true \
