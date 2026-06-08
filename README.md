@@ -1,91 +1,68 @@
 ![](./assets/banner.png)
 
-# HRM-MoE
+# HRM-MoE: Efficient Sparse Pretraining with Hierarchical Reasoning
 
-HRM-MoE is a Mixture-of-Experts fork of
+<p align="center">
+  <a href="https://arxiv.org/abs/2605.20613"><img src="https://img.shields.io/badge/Base-HRM--Text-red?logo=arxiv&logoColor=white" alt="HRM-Text Paper"></a>
+  <a href="https://github.com/XiaoYee/HRM-MoE"><img src="https://img.shields.io/badge/Code-HRM--MoE-181717?logo=github&logoColor=white" alt="HRM-MoE Code"></a>
+</p>
+
+## Model Structure Comparison
+
+```mermaid
+flowchart LR
+  subgraph Dense["HRM-Text dense block"]
+    direction TB
+    D0["Packed PrefixLM tokens"] --> D1["HRM recurrent layers"]
+    D1 --> D2["Attention"]
+    D2 --> D3["Dense SwiGLU FFN<br/>one shared 4096-wide intermediate"]
+    D3 --> D4["LM head"]
+  end
+
+  subgraph Sparse["HRM-MoE block"]
+    direction TB
+    M0["Packed PrefixLM tokens"] --> M1["HRM recurrent layers"]
+    M1 --> M2["Attention"]
+    M2 --> M3["FP32 router<br/>64 experts, top-k 8"]
+    M3 --> M4["Grouped Triton dispatch"]
+    M4 --> M5["8 active experts x 512 width<br/>active width = 4096"]
+    M5 --> M6["Weighted combine<br/>aux load-balancing loss"]
+    M6 --> M7["LM head"]
+  end
+```
+
+HRM-MoE is a sparse Mixture-of-Experts extension of
 [sapientinc/HRM-Text](https://github.com/sapientinc/HRM-Text). It keeps the
-original HRM-Text training stack, PrefixLM packing, FlashAttention 3 path,
-FSDP2 checkpointing, evaluation tooling, and data workflow, then adds sparse
-MoE feed-forward blocks for HRM-style language-model pretraining and SFT.
+original HRM-Text recipe for hierarchical recurrent modeling, PrefixLM sequence
+packing, FlashAttention 3, PyTorch FSDP2 training, checkpointing, evaluation,
+and conversion, while replacing the dense FFN path with a routed MoE FFN.
 
-The main experimental target in this checkout is an XL HRM model with 64
-experts and top-k 8 routing. Each active expert uses an intermediate width of
-512, so the active MoE FFN width matches the dense XL SwiGLU width of 4096.
+The current code version uses one final MoE preset:
 
-## What Changed
+| Preset | Experts | Top-k | Active expert width | Expert compute |
+| --- | ---: | ---: | ---: | --- |
+| [`XL_moe64x8_grouped_triton`](config/arch/size/XL_moe64x8_grouped_triton.yaml) | 64 | 8 | `8 x 512 = 4096` | grouped Triton GEMM |
 
-- Qwen-style sparse MoE FFN with fp32 router softmax, top-k routing, optional
-  top-k probability renormalization, load-balancing auxiliary loss, and expert
-  count metrics.
-- Multiple expert compute backends:
-  - `origin`: reference per-expert ModuleList implementation.
-  - `shard`: packed expert shards.
-  - `grouped`: padded `torch.bmm` grouped expert compute.
-  - `grouped_triton`: unpadded Triton grouped GEMM expert compute.
-  - `grouped_cutlass`: CUTLASS grouped GEMM expert compute.
-  - `grouped_ep`: expert-parallel all-to-all dispatch across distributed ranks.
-- MoE architecture presets under [`config/arch/size`](config/arch/size), led by
-  [`XL_moe64x8_grouped_triton.yaml`](config/arch/size/XL_moe64x8_grouped_triton.yaml).
-- MoE equivalence tests for local and distributed expert implementations.
-- Optional MoE profiling via `HRM_MOE_PROFILE=1`, with forward/backward phase
-  timing printed by `pretrain.py`.
-- rjob launch wrappers for the PJLab/rjob training environment used by this
-  working checkout.
+This keeps the active FFN width aligned with the dense XL HRM-Text FFN while
+giving the model a larger sparse expert pool.
 
-The dense HRM-Text path is still present. Select a MoE size config with Hydra to
-enable sparse experts.
+## Launch the MoE Pretraining
 
-## Repository Layout
+### Required Resources
 
-```text
-HRM-MoE/
-|-- config/                       # Hydra configs for model, data, and training
-|-- config/arch/size/*moe*.yaml   # MoE size presets
-|-- conversion/convert_to_hf.py    # FSDP2 checkpoint -> HF-style export
-|-- evaluation/                    # Evaluation engines, benchmark wrappers, configs
-|-- models/                        # HRM, Transformer blocks, dense layers, MoE layers
-|-- models/moe_*                   # MoE kernels and profiling helpers
-|-- docker/                        # Tested CUDA/PyTorch/FlashAttention environment
-|-- scripts/                       # Data prep, rjob launchers, eval, MoE equivalence tests
-|-- dataset_new.py                 # PrefixLM packed dataset loader
-|-- multipack_sampler.py           # Distributed multipack batch sampler
-|-- pretrain.py                    # FSDP2 pretraining/SFT entrypoint
-|-- simple_inference_engine.py     # Native checkpoint inference helper
-`-- requirements.txt
-```
+The intended training target is Hopper-class GPUs because the attention path
+depends on FlashAttention 3 and the final MoE expert path uses Triton kernels.
 
-## Environment
+The final MoE preset is designed for multi-GPU pretraining:
 
-Hopper-class GPUs are the expected target because the training attention path
-depends on FlashAttention 3.
+| Model | Preset | GPUs | Notes |
+| --- | --- | ---: | --- |
+| HRM-MoE XL 64x8 | `XL_moe64x8_grouped_triton` | 8+ H100/H200 | use shared storage for data and checkpoints |
 
-The upstream tested image is:
+### 1. Prepare Data
 
-```bash
-docker run --gpus all --ipc=host --network=host -it \
-  -v "$PWD":/workspace \
-  sapientai/hrm-text:latest
-```
-
-If you are installing manually, follow the tested CUDA, PyTorch, and
-FlashAttention versions in [`docker/Dockerfile`](docker/Dockerfile), then run:
-
-```bash
-pip install -r requirements.txt
-```
-
-Some MoE backends need extra runtime support:
-
-- `grouped_triton` uses Triton kernels from
-  [`models/moe_triton_grouped_gemm.py`](models/moe_triton_grouped_gemm.py).
-- `grouped_cutlass` uses the CUTLASS grouped GEMM helper in
-  [`models/moe_cutlass_grouped_gemm.py`](models/moe_cutlass_grouped_gemm.py).
-- `grouped_ep` requires initialized `torch.distributed` collectives.
-
-## Data
-
-HRM-MoE uses the same sampled tokenized layout as HRM-Text. The training
-`data.path` directory must contain:
+HRM-MoE trains from the same sampled, tokenized data layout as HRM-Text. The
+training `data.path` directory must contain:
 
 ```text
 metadata.json
@@ -96,7 +73,7 @@ epoch_<n>/resp_start.npy
 epoch_<n>/resp_len.npy
 ```
 
-The data is normally produced by the companion
+Prepare sampled data with the companion
 [sapientinc/data_io](https://github.com/sapientinc/data_io) pipeline:
 
 ```bash
@@ -105,26 +82,49 @@ python sample_tokenized.py epochs=4 output_path=/path/to/sampled > show_analytic
 ```
 
 For reusable experiments, keep sampled data on shared storage and pass it with
-`data.path=/path/to/sampled`. Avoid relying on `/dev/shm` unless training and
-sampling happen in the same container.
+`data.path=/path/to/sampled`. Only use `/dev/shm` for short same-container
+debugging.
 
-## Train
+### 2. Start the Environment
 
-The recommended 64x8 MoE preset is `XL_moe64x8_grouped_triton`:
+The upstream tested Docker image is:
+
+```bash
+docker run --gpus all --ipc=host --network=host -it \
+  -v "$PWD":/workspace \
+  sapientai/hrm-text:latest
+```
+
+If you install from source, follow the tested CUDA, PyTorch, and FlashAttention
+versions in [`docker/Dockerfile`](docker/Dockerfile), then run:
+
+```bash
+pip install -r requirements.txt
+```
+
+For multi-node training, mount the same workspace and checkpoint path on every
+node. Verify NCCL before starting a long job.
+
+### 3. Launch Pretraining
+
+Single-node example:
 
 ```bash
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+HRM_MOE_TRITON_AUTOTUNE=1 \
+HRM_MOE_TRITON_SM_MARGIN=16 \
 torchrun --nproc_per_node=8 pretrain.py \
   arch/size@arch=XL_moe64x8_grouped_triton \
   data.path=/path/to/sampled \
   global_batch_size=196608
 ```
 
-For multi-node runs, launch the same command on each node with the usual
-`torchrun` rendezvous arguments:
+Multi-node example:
 
 ```bash
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+HRM_MOE_TRITON_AUTOTUNE=1 \
+HRM_MOE_TRITON_SM_MARGIN=16 \
 torchrun \
   --nproc_per_node=8 \
   --nnodes=<NUM_NODES> \
@@ -136,77 +136,27 @@ torchrun \
   data.path=/path/to/sampled
 ```
 
-MoE-specific training notes:
+Useful MoE training switches:
 
-- `compile_train_batch` remains available, but `pretrain.py` disables compile
-  for MoE by default unless `allow_compile_moe=true`.
+- `allow_compile_moe=false` is the default; sparse routing currently runs in
+  eager mode for stability.
 - `fsdp_wrap_moe_experts=true` wraps packed expert parameters separately when
   possible.
-- `HRM_MOE_TRITON_AUTOTUNE=1` enables Triton kernel autotuning.
-- `HRM_MOE_TRITON_SM_MARGIN=16` reserves SMs for non-GEMM work in the Triton
-  grouped backend.
 - `HRM_MOE_PROFILE=1` prints MoE phase timings for router, dispatch, grouped
-  GEMMs, activation, combine, aux metrics, and expert-parallel communication.
+  GEMMs, activation, combine, and auxiliary metrics.
 
-PJLab/rjob convenience wrappers are kept in [`scripts`](scripts):
-
-```bash
-num_gpus=8 arch_size=XL_moe64x8_grouped_triton \
-  data_path=/path/to/sampled \
-  bash scripts/rjob_hrm_pretrain.sh
-```
-
-Use `dry_run=true` with a wrapper before launching a real cluster job.
-
-## SFT
-
-Full-parameter SFT uses the same `pretrain.py` entrypoint with
-`--config-name cfg_sft`:
+On the rjob cluster, the same final preset can be launched through the wrapper:
 
 ```bash
-python scripts/prepare_sft_data.py \
-  --train input.jsonl \
-  --tokenizer /path/to/tokenizer.json \
-  --output /path/to/sft_data \
-  --epochs 5
-
-OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
-torchrun --nproc_per_node=8 pretrain.py \
-  --config-name cfg_sft \
-  arch/size@arch=XL_moe64x8_grouped_triton \
-  data.path=/path/to/sft_data \
-  resume_from=/path/to/pretrain_ckpt \
-  +checkpoint_path=/path/to/sft_out
+num_gpus=8 \
+arch_size=XL_moe64x8_grouped_triton \
+data_path=/path/to/sampled \
+bash scripts/rjob_hrm_pretrain.sh
 ```
 
-`--epochs` for data preparation must match the SFT training config. Use
-`weights_only_resume_from_ema=true` when fine-tuning from a pretrain EMA while
-starting with a fresh optimizer.
+Use `dry_run=true` before submitting a real rjob launch.
 
-## Verify MoE Implementations
-
-Run the CPU equivalence check locally:
-
-```bash
-python scripts/test_moe_shard_equivalence.py
-```
-
-Run the distributed expert-parallel equivalence check with torchrun:
-
-```bash
-torchrun --nproc_per_node=8 scripts/test_moe_ep_distributed_equivalence.py
-```
-
-On the rjob cluster:
-
-```bash
-bash scripts/rjob_hrm_moe_equiv.sh
-```
-
-For CUDA/bfloat16 checks, set the `MOE_EQUIV_*` environment variables used by
-the test scripts, for example `MOE_EQUIV_DEVICE=cuda`.
-
-## Evaluate
+### 4. Evaluate
 
 Evaluation loads the latest checkpoint epoch automatically when `ckpt_epoch` is
 not provided:
@@ -215,7 +165,7 @@ not provided:
 python -m evaluation.main ckpt_path=/path/to/checkpoint_dir
 ```
 
-For selected benchmarks:
+To run a benchmark subset and lower memory use:
 
 ```bash
 python -m evaluation.main \
@@ -224,7 +174,7 @@ python -m evaluation.main \
   generation_config.batch_size=16
 ```
 
-The 8-GPU fanout entrypoint shards prompts within each benchmark:
+For 8-GPU fanout evaluation on rjob:
 
 ```bash
 ckpt_path=/path/to/checkpoint_dir \
@@ -234,61 +184,89 @@ entrypoint=scripts/hrm_eval_fanout_entrypoint.sh \
 bash scripts/rjob_hrm_eval.sh
 ```
 
-## Model Configurations
+## Fine-Tuning (SFT)
 
-Architectures live under [`config/arch/net`](config/arch/net):
+Continue from a pretrain checkpoint on instruction data. Full-parameter SFT uses
+the same `pretrain.py` entrypoint with `--config-name cfg_sft`.
 
-| Config | Model |
-| --- | --- |
-| `hrm` | HRM-Text / HRM-MoE backbone |
-| `transformer` | Standard Transformer wrapper |
-| `trm` | Tiny Recursive Model baseline |
-| `trm_match_recurrence` | TRM configured to match HRM recurrence with half parameters |
-| `rins` | Recursive Inference Scaling baseline |
-| `ut` | Universal Transformer baseline |
+Input is a JSONL file with one object per line:
 
-MoE size presets live under [`config/arch/size`](config/arch/size):
+```json
+{"instruction": "<full prompt>", "response": "<expected output>", "condition": "direct"}
+```
 
-| Config | Experts | Top-k | Backend |
-| --- | ---: | ---: | --- |
-| `XL_moe64x8` | 64 | 8 | reference per-expert |
-| `XL_moe64x8_shard` | 64 | 8 | packed expert shards |
-| `XL_moe64x8_grouped` | 64 | 8 | padded grouped `torch.bmm` |
-| `XL_moe64x8_grouped_triton` | 64 | 8 | Triton grouped GEMM |
-| `XL_moe64x8_grouped_cutlass` | 64 | 8 | CUTLASS grouped GEMM |
-| `XL_moe64x8_grouped_ep` | 64 | 8 | expert-parallel all-to-all |
+Prepare SFT data:
 
-Dense HRM-Text size presets remain available:
+```bash
+python scripts/prepare_sft_data.py \
+  --train input.jsonl \
+  --tokenizer /path/to/tokenizer.json \
+  --output /path/to/sft_data \
+  --epochs 5
+```
 
-| Config | Layers | Hidden | Heads |
-| --- | ---: | ---: | ---: |
-| `B` | 12 | 1024 | 8 |
-| `L` | 24 | 1280 | 10 |
-| `XL` | 32 | 1536 | 12 |
-| `XXL` | 72 | 1792 | 14 |
-| `XXL_wide` | 32 | 2560 | 20 |
+Launch SFT:
 
-For HRM and RINS, `half_layers: true` splits the configured layer count evenly
-between the H and L modules.
+```bash
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+HRM_MOE_TRITON_AUTOTUNE=1 \
+HRM_MOE_TRITON_SM_MARGIN=16 \
+torchrun --nproc_per_node=8 pretrain.py \
+  --config-name cfg_sft \
+  arch/size@arch=XL_moe64x8_grouped_triton \
+  data.path=/path/to/sft_data \
+  resume_from=/path/to/pretrain_ckpt \
+  +checkpoint_path=/path/to/sft_out
+```
+
+`--epochs` for data preparation must match the SFT training config. Add
+`weights_only_resume_from_ema=true` when fine-tuning from pretrain EMA weights
+with a fresh optimizer.
+
+## Verify the Final MoE Path
+
+Run a local equivalence smoke test:
+
+```bash
+python scripts/test_moe_shard_equivalence.py
+```
+
+Run the CUDA/rjob MoE gate before trusting a kernel or routing change:
+
+```bash
+bash scripts/rjob_hrm_moe_equiv.sh
+```
+
+## Repository Layout
+
+```text
+HRM-MoE/
+|-- config/                       # Hydra configs for model, data, and training
+|-- config/arch/size/XL_moe64x8_grouped_triton.yaml
+|-- conversion/convert_to_hf.py    # FSDP2 checkpoint -> HF-style export
+|-- evaluation/                    # Evaluation engines, benchmark wrappers, configs
+|-- models/layers.py               # Attention, dense FFN, and final sparse MoE layer
+|-- models/moe_triton_grouped_gemm.py
+|-- models/moe_profile.py
+|-- docker/                        # Tested CUDA/PyTorch/FlashAttention environment
+|-- scripts/                       # Data prep, rjob launchers, eval, validation
+|-- dataset_new.py                 # PrefixLM packed dataset loader
+|-- multipack_sampler.py           # Distributed multipack batch sampler
+|-- pretrain.py                    # FSDP2 pretraining/SFT entrypoint
+`-- simple_inference_engine.py     # Native checkpoint inference helper
+```
 
 ## Technical Notes
 
-- [`models/layers.py`](models/layers.py) contains the dense SwiGLU path and the
-  sparse MoE implementations.
+- [`models/layers.py`](models/layers.py) contains the final sparse MoE FFN path:
+  fp32 router softmax, top-k 8 routing, grouped Triton expert compute, weighted
+  combine, and auxiliary load-balancing loss.
 - [`models/moe_triton_grouped_gemm.py`](models/moe_triton_grouped_gemm.py)
-  implements the Triton grouped GEMM backend.
-- [`models/moe_cutlass_grouped_gemm.py`](models/moe_cutlass_grouped_gemm.py)
-  contains the optional CUTLASS grouped backend wrapper.
+  implements the grouped Triton expert GEMM path used by the final preset.
 - [`models/moe_profile.py`](models/moe_profile.py) records optional CUDA event
-  timings for MoE phases.
+  timings when `HRM_MOE_PROFILE=1`.
 - [`dataset_new.py`](dataset_new.py) loads PrefixLM packed samples and emits
   FlashAttention sequence metadata.
-- [`multipack_sampler.py`](multipack_sampler.py) implements distributed
-  multipack batching.
-- [`models/flash_attention_prefixlm_v2.py`](models/flash_attention_prefixlm_v2.py)
-  implements the two-pass PrefixLM attention path.
-- [`models/lm_head.py`](models/lm_head.py) attaches scaled embeddings, the
-  output head, losses, token accuracy, and sequence exact accuracy.
 - [`pretrain.py`](pretrain.py) handles Hydra config, FSDP2 wrapping, optimizer
   creation, LR schedule, W&B logging, code/config snapshots, and checkpointing.
 
