@@ -1007,3 +1007,22 @@ AIME25 Majority Voting（百分比）：
   远端文件为 `.gitattributes`、`LICENSE`、`README.md`、`config.json`、
   `model.safetensors`、`tokenizer.json`、`tokenizer_config.json` 共 7 个根目录文件。
   临时 token 文件 `/tmp/hrm_moe_hf_token` 已删除。
+
+### 2026-06-09 07:09 HKT HRM-MoE Hugging Face model card 更新
+
+- 按用户要求重写 `Xiaoye08/HRM-MoE` 的 HF `README.md`，开头强调 64x8 MoE 的
+  sparse activation：总参数 `5,413,799,424`，专家参数 `4,831,838,208`，非专家参数
+  `581,961,216`，top-8/64 后每 token active params 约 `1,185,940,992`，active ratio
+  约 `21.9%`。
+- HF model card 增加 Dense HRM-Text XL vs HRM-MoE 64x8 的结构对比和 epoch4 结果对比；
+  AIME25 已使用 `hrmmoe32-0605-e4-aime` 的最终 epoch4 结果：
+  `maj_pass@1=16.67`、`maj_pass@10=36.67`、`maj_pass@100=56.67`。
+- `simple_inference_engine.py` 新增 `inference_load_hf_checkpoint`，可从
+  `Xiaoye08/HRM-MoE` 下载单文件 `model.safetensors`，将 release 键名
+  `model.H_module/L_module` 映射回原生 `model.H_level/L_level`，再复用
+  `inference_generate` 做 PrefixLM prefill/decode。该 loader 不实例化训练 optimizer。
+  GitHub `XiaoYee/HRM-MoE` 的 `main` 已快进到 `72cf38c`，默认 clone 即可拿到 loader。
+- 07:11 HKT 仅上传远端 `README.md`，未重新上传 `model.safetensors`。HF 远端文件列表复查
+  仍为 `.gitattributes`、`LICENSE`、`README.md`、`config.json`、`model.safetensors`、
+  `tokenizer.json`、`tokenizer_config.json` 七个根目录文件；raw URL 已确认能看到
+  active params、Dense HRM-Text 对比和 `inference_load_hf_checkpoint` 推理示例。
