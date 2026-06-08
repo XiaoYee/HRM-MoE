@@ -514,6 +514,14 @@ python scripts/prepare_sft_data.py \
   speed-test checkpoints with a short CPU rjob that mounts `quxiaoye` and runs
   exact-path `rm -rf`; do not rely on login-node deletion. Preserve active
   long-run checkpoint paths such as `hrm-moe32g-sm16-06050339`.
+- For Hugging Face model releases, do not upload native FSDP2 checkpoint
+  directories as the public artifact unless explicitly requested. They include
+  optimizer/EMA state and dozens of `.distcp` shards. Match the HRM-Text-1B
+  release shape by extracting EMA model weights from the FSDP2 checkpoint,
+  casting them to bf16, and publishing `model.safetensors` plus config,
+  tokenizer, README, license, and optional assets. The 64x8 MoE epoch-4
+  checkpoint contains about 21.7 GB of bf16 model weights and about 65 GB of
+  optimizer/EMA storage in the native checkpoint.
 
 ## Local Validation
 
