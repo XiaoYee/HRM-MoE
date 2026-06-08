@@ -9,6 +9,7 @@ job_name="${SFT_JOB_NAME:-hrm-moe64-sft-ultra0607}"
 num_gpus="${SFT_NUM_GPUS:-32}"
 arch_size="${SFT_ARCH_SIZE:-XL_moe64x8_grouped_triton}"
 epochs="${SFT_EPOCHS:-5}"
+target_resume_epoch="${SFT_RESUME_EPOCH:-4}"
 global_batch_size="${SFT_GLOBAL_BATCH_SIZE:-32768}"
 required_carry_count="${REQUIRED_CARRY_COUNT:-32}"
 poll_seconds="${POLL_SECONDS:-300}"
@@ -46,7 +47,7 @@ job_state() {
   fi
   if grep -qiE ": (Succeeded|Completed|Success)" <<<"${output}"; then
     echo "SUCCEEDED"
-  elif grep -qiE ": (Failed|Error|Terminated|Killed)" <<<"${output}" || grep -qiE "failed': [1-9]" <<<"${output}"; then
+  elif grep -qiE ": (Failed|Error|Terminated|Killed|Stopped)" <<<"${output}" || grep -qiE "failed': [1-9]" <<<"${output}"; then
     echo "FAILED"
   elif grep -qiE ": (Running|Pending|STARTING|Starting|Created)" <<<"${output}"; then
     echo "RUNNING"
@@ -136,13 +137,27 @@ PY
 }
 
 latest_stable_resume_epoch() {
-  python - "${resume_from}" "${required_carry_count}" <<'PY'
+  python - "${resume_from}" "${required_carry_count}" "${target_resume_epoch}" <<'PY'
 import re
 import sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
 required = int(sys.argv[2])
+target = int(sys.argv[3]) if sys.argv[3] else None
+
+def is_complete(epoch: int) -> bool:
+    ckpt = root / f"fsdp2_epoch_{epoch}"
+    if not ckpt.is_dir() or not (ckpt / ".metadata").is_file():
+        return False
+    carry = list(root.glob(f"carry_epoch_{epoch}.*.pt"))
+    return len(carry) >= required
+
+if target is not None:
+    if is_complete(target):
+        print(target)
+    raise SystemExit(0)
+
 epochs = []
 for ckpt in root.glob("fsdp2_epoch_*"):
     if not ckpt.is_dir() or not (ckpt / ".metadata").is_file():
@@ -151,8 +166,7 @@ for ckpt in root.glob("fsdp2_epoch_*"):
     if not match:
         continue
     epoch = int(match.group(1))
-    carry = list(root.glob(f"carry_epoch_{epoch}.*.pt"))
-    if len(carry) >= required:
+    if is_complete(epoch):
         epochs.append(epoch)
 if epochs:
     print(max(epochs))
@@ -223,7 +237,7 @@ wait_for_resume_epoch() {
       fi
       log "resume checkpoint epoch ${epoch} exists but is still changing"
     else
-      log "waiting_resume_checkpoint path=${resume_from}"
+      log "waiting_resume_checkpoint path=${resume_from} target_epoch=${target_resume_epoch:-latest}"
     fi
     sleep "${poll_seconds}"
   done
@@ -240,10 +254,15 @@ submit_sft() {
   fi
   marker="${marker_dir}/${name}.submitted"
 
-  if [[ -f "${marker}" && "$(job_state "${name}")" != "MISSING" ]]; then
-    log "already_submitted job=${name} marker=${marker}"
-    echo "${name}"
-    return 0
+  if [[ -f "${marker}" ]]; then
+    local existing_state
+    existing_state="$(job_state "${name}")"
+    if [[ "${existing_state}" == "RUNNING" || "${existing_state}" == "SUCCEEDED" ]]; then
+      log "already_submitted job=${name} state=${existing_state} marker=${marker}"
+      echo "${name}"
+      return 0
+    fi
+    log "stale_marker_ignored job=${name} state=${existing_state} marker=${marker}"
   fi
 
   cd "${repo_dir}"
@@ -308,6 +327,7 @@ monitor_sft_job() {
 log "watching data_path=${data_path}"
 log "repo_dir=${repo_dir}"
 log "resume_from=${resume_from}"
+log "target_resume_epoch=${target_resume_epoch:-latest}"
 wait_for_sft_data
 resume_epoch="$(wait_for_resume_epoch)"
 attempt=1

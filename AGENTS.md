@@ -467,9 +467,12 @@ python scripts/prepare_sft_data.py \
   path, and forgetting `repo_dir` can start SFT from code that does not match
   the MoE checkpoint. For UltraData SFT, use
   `scripts/local_ultradata_moe64_sft_after_prepare.sh` so the prepared HRM SFT
-  layout is header-validated before launch, `resume_epoch` is pinned to a
-  stable checkpoint with all 32 carry files, and SFT starts from EMA weights
-  with a fresh optimizer via `weights_only_resume_from_ema=true`.
+  layout is header-validated before launch, `resume_epoch` is pinned to the
+  requested stable checkpoint with all 32 carry files, and SFT starts from EMA
+  weights with a fresh optimizer via `weights_only_resume_from_ema=true`.
+  For the UltraData MoE64 SFT run, do not start from the currently latest
+  checkpoint if it is only epoch 3; set `SFT_RESUME_EPOCH=4` and wait for
+  `hrm-moe32g-sm16-06050339/fsdp2_epoch_4` to become stable.
 - Keep UltraData MoE SFT monitors alive after rjob submission. The watcher must
   inspect rjob state and final checkpoint artifacts until `fsdp2_epoch_5` plus
   all 32 `carry_epoch_5.*.pt` files are stable; a successful submit command is

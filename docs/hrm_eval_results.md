@@ -859,13 +859,13 @@ AIME25 Majority Voting（百分比）：
 | Raw 数据目录 | `/mnt/shared-storage-user/quxiaoye/HRM-Text/data_ultradata_sft_2605_raw` |
 | 训练 worktree | `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8` |
 | 预训练 checkpoint | `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8/checkpoints/hrm-moe32g-sm16-06050339` |
-| SFT 输出 checkpoint | `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8/checkpoints/hrm-moe64x8-ultradata-sft-0607` |
-| 计划 SFT job | `hrm-moe64-sft-ultra0607` |
+| SFT 输出 checkpoint | `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8/checkpoints/hrm-moe64x8-ultradata-sft-e4-0608` |
+| 计划 SFT job | `hrm-moe64-sft-ultra0608-e4` |
 | 资源 | 32 张 H200，4 replicas x 8 GPUs |
 | 架构 | `arch_size=XL_moe64x8_grouped_triton` |
 | MoE 速度环境 | `HRM_MOE_TRITON_AUTOTUNE=1`, `HRM_MOE_TRITON_SM_MARGIN=16` |
 | SFT 超参 | `epochs=5`, `global_batch_size=32768`, `lr=3.0e-5`, `checkpoint_interval=1`, `compile_train_batch=false` |
-| Resume 策略 | watcher 自动选择最新稳定 epoch，要求 `.metadata` 和 32 个 `carry_epoch_<N>.<rank>.pt`；通过 `resume_epoch=<N>` 固定 |
+| Resume 策略 | watcher 固定等待 `SFT_RESUME_EPOCH=4`，要求 `.metadata` 和 32 个 `carry_epoch_4.<rank>.pt` 稳定后才提交 |
 | EMA 策略 | `weights_only_resume_from_ema=true`，从 EMA 预训练权重开始并重置 optimizer |
 
 数据格式注意事项：
@@ -902,3 +902,20 @@ AIME25 Majority Voting（百分比）：
 - 当前状态仍是等待 SFT 数据目录
   `/mnt/shared-storage-user/quxiaoye/HRM-Text/data_ultradata_sft_2605_hrm_sft_e5_ctx4097`
   生成；prepare 完成前不会启动 MoE SFT。
+
+### 2026-06-08 11:12 HKT SFT 启动源修正
+
+用户指出 UltraData SFT 不能从 `hrm-moe32g-sm16-06050339` 的 epoch3 启动，需要等
+该预训练任务完整跑完后，使用 epoch4 checkpoint 进行 SFT。
+
+- 已停止本地 watcher `hrm_moe64_ultradata_sft_after_prepare`，避免它继续监控并重试
+  已排队的 epoch3 SFT。
+- 已停止错误排队的 `hrm-moe64-sft-ultra0607`，该 job 当时仍在 `STARTING`，尚未进
+  入训练容器。
+- `scripts/local_ultradata_moe64_sft_after_prepare.sh` 已改为默认
+  `SFT_RESUME_EPOCH=4`，只在
+  `/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8/checkpoints/hrm-moe32g-sm16-06050339/fsdp2_epoch_4`
+  以及 32 个 `carry_epoch_4.*.pt` 稳定后提交 SFT。
+- 后续使用新的 job/checkpoint 名，避免旧 stopped job 和 marker 干扰：
+  `SFT_JOB_NAME=hrm-moe64-sft-ultra0608-e4`，
+  `SFT_CHECKPOINT_PATH=/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8/checkpoints/hrm-moe64x8-ultradata-sft-e4-0608`。
