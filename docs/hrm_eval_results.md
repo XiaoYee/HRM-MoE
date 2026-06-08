@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-08 17:36:15 HKT。
+最后更新：2026-06-08 17:41:29 HKT。
 
 ## 16 卡基线实验
 
@@ -761,7 +761,7 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:start -->
 ## 32 卡在线评测监控：`hrm-moe32g-sm16-06050339`
 
-最后刷新：2026-06-08 17:36:15 HKT。
+最后刷新：2026-06-08 17:41:29 HKT。
 
 | 项目 | 值 |
 | --- | --- |
@@ -786,7 +786,7 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 | AIME25 | 3 | `hrmmoe32-0605-e3-aime` | succeeded | `rjob_logs/hrmmoe32-0605-e3-aime_bench/summary.json` |
 | Standard | 4 | `hrmmoe32-0605-e4-std` | running | - |
 | MMLU-Pro | 4 | `hrmmoe32-0605-e4-mmlu` | running | - |
-| AIME25 | 4 | `hrmmoe32-0605-e4-aime` | running | - |
+| AIME25 | 4 | `hrmmoe32-0605-e4-aime` | stopped | - |
 
 主指标（百分比）：
 
@@ -828,7 +828,6 @@ AIME25 Majority Voting（百分比）：
 | pass@100 | 34.90 | 37.96 | 38.01 | - |
 
 最近运行记录：
-- 2026-06-07 20:31:11 HKT：Loaded summary for hrmmoe32-0605-e3-std: rjob_logs/hrmmoe32-0605-e3-std_bench/summary.json.
 - 2026-06-07 22:09:06 HKT：Eval job hrmmoe32-0605-e3-aime is Succeeded.
 - 2026-06-07 22:09:07 HKT：Loaded summary for hrmmoe32-0605-e3-aime: rjob_logs/hrmmoe32-0605-e3-aime_bench/summary.json.
 - 2026-06-08 17:23:37 HKT：Training job hrm-moe32g-sm16-06050339 is Succeeded.
@@ -840,6 +839,7 @@ AIME25 Majority Voting（百分比）：
 - 2026-06-08 17:31:01 HKT：Eval job hrmmoe32-0605-e4-mmlu is Running.
 - 2026-06-08 17:31:02 HKT：Eval job hrmmoe32-0605-e4-std is Running.
 - 2026-06-08 17:36:14 HKT：Eval job hrmmoe32-0605-e4-aime is Running.
+- 2026-06-08 17:41:27 HKT：Eval job hrmmoe32-0605-e4-aime is Stopped.
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:end -->
 
 ## UltraData SFT 接入 64x8 MoE
@@ -919,3 +919,16 @@ AIME25 Majority Voting（百分比）：
 - 后续使用新的 job/checkpoint 名，避免旧 stopped job 和 marker 干扰：
   `SFT_JOB_NAME=hrm-moe64-sft-ultra0608-e4`，
   `SFT_CHECKPOINT_PATH=/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8/checkpoints/hrm-moe64x8-ultradata-sft-e4-0608`。
+
+### 2026-06-08 17:37 HKT SFT 让路与启动
+
+- epoch4 checkpoint 已完成后，评测 watcher 提交了 Standard/MMLU-Pro/AIME25 三个
+  8 卡 eval；为优先启动线上 UltraData SFT，手动停止
+  `hrmmoe32-0605-e4-aime`。普通 `rjob stop` 后状态刷新较慢，随后使用
+  `rjob stop --force hrmmoe32-0605-e4-aime`；`rjob events` 先显示 pod deleted，
+  `rjob get` 在 17:37 HKT 确认 `Stopped`。
+- SFT 首次 job `hrm-moe64-sft-ultra0608-e4` 四个 replica 失败，watcher 自动提交
+  `hrm-moe64-sft-ultra0608-e4-r2`，checkpoint path 为
+  `checkpoints/hrm-moe64x8-ultradata-sft-e4-0608-r2`。
+- 17:37 HKT，`hrm-moe64-sft-ultra0608-e4-r2` 已拿到 4 replicas x 8 GPUs 并进入
+  `Running`。epoch4 AIME25 评测暂缓，后续需要手动重跑。
