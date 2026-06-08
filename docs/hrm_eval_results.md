@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-08 17:31:02 HKT。
+最后更新：2026-06-08 17:36:15 HKT。
 
 ## 16 卡基线实验
 
@@ -761,7 +761,7 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:start -->
 ## 32 卡在线评测监控：`hrm-moe32g-sm16-06050339`
 
-最后刷新：2026-06-08 17:31:02 HKT。
+最后刷新：2026-06-08 17:36:15 HKT。
 
 | 项目 | 值 |
 | --- | --- |
@@ -786,7 +786,7 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 | AIME25 | 3 | `hrmmoe32-0605-e3-aime` | succeeded | `rjob_logs/hrmmoe32-0605-e3-aime_bench/summary.json` |
 | Standard | 4 | `hrmmoe32-0605-e4-std` | running | - |
 | MMLU-Pro | 4 | `hrmmoe32-0605-e4-mmlu` | running | - |
-| AIME25 | 4 | `hrmmoe32-0605-e4-aime` | submitted | - |
+| AIME25 | 4 | `hrmmoe32-0605-e4-aime` | running | - |
 
 主指标（百分比）：
 
@@ -828,7 +828,6 @@ AIME25 Majority Voting（百分比）：
 | pass@100 | 34.90 | 37.96 | 38.01 | - |
 
 最近运行记录：
-- 2026-06-07 20:31:11 HKT：Eval job hrmmoe32-0605-e3-std is Succeeded.
 - 2026-06-07 20:31:11 HKT：Loaded summary for hrmmoe32-0605-e3-std: rjob_logs/hrmmoe32-0605-e3-std_bench/summary.json.
 - 2026-06-07 22:09:06 HKT：Eval job hrmmoe32-0605-e3-aime is Succeeded.
 - 2026-06-07 22:09:07 HKT：Loaded summary for hrmmoe32-0605-e3-aime: rjob_logs/hrmmoe32-0605-e3-aime_bench/summary.json.
@@ -840,6 +839,7 @@ AIME25 Majority Voting（百分比）：
 - 2026-06-08 17:31:00 HKT：Eval job hrmmoe32-0605-e4-aime is Unknown.
 - 2026-06-08 17:31:01 HKT：Eval job hrmmoe32-0605-e4-mmlu is Running.
 - 2026-06-08 17:31:02 HKT：Eval job hrmmoe32-0605-e4-std is Running.
+- 2026-06-08 17:36:14 HKT：Eval job hrmmoe32-0605-e4-aime is Running.
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:end -->
 
 ## UltraData SFT 接入 64x8 MoE
