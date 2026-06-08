@@ -1,6 +1,6 @@
 # HRM 预训练实验与评测结果
 
-最后更新：2026-06-08 17:25:49 HKT。
+最后更新：2026-06-08 17:31:02 HKT。
 
 ## 16 卡基线实验
 
@@ -761,7 +761,7 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:start -->
 ## 32 卡在线评测监控：`hrm-moe32g-sm16-06050339`
 
-最后刷新：2026-06-08 17:25:49 HKT。
+最后刷新：2026-06-08 17:31:02 HKT。
 
 | 项目 | 值 |
 | --- | --- |
@@ -784,8 +784,8 @@ bring-up / speed / dense 对照 checkpoint。登录节点直接 `rm -rf` 因 rjo
 | Standard | 3 | `hrmmoe32-0605-e3-std` | succeeded | `rjob_logs/hrmmoe32-0605-e3-std_bench/summary.json` |
 | MMLU-Pro | 3 | `hrmmoe32-0605-e3-mmlu` | succeeded | `rjob_logs/hrmmoe32-0605-e3-mmlu_bench/summary.json` |
 | AIME25 | 3 | `hrmmoe32-0605-e3-aime` | succeeded | `rjob_logs/hrmmoe32-0605-e3-aime_bench/summary.json` |
-| Standard | 4 | `hrmmoe32-0605-e4-std` | submitted | - |
-| MMLU-Pro | 4 | `hrmmoe32-0605-e4-mmlu` | submitted | - |
+| Standard | 4 | `hrmmoe32-0605-e4-std` | running | - |
+| MMLU-Pro | 4 | `hrmmoe32-0605-e4-mmlu` | running | - |
 | AIME25 | 4 | `hrmmoe32-0605-e4-aime` | submitted | - |
 
 主指标（百分比）：
@@ -828,9 +828,6 @@ AIME25 Majority Voting（百分比）：
 | pass@100 | 34.90 | 37.96 | 38.01 | - |
 
 最近运行记录：
-- 2026-06-07 20:05:23 HKT：Eval job hrmmoe32-0605-e3-aime is Running.
-- 2026-06-07 20:05:24 HKT：Eval job hrmmoe32-0605-e3-mmlu is Succeeded.
-- 2026-06-07 20:05:25 HKT：Loaded summary for hrmmoe32-0605-e3-mmlu: rjob_logs/hrmmoe32-0605-e3-mmlu_bench/summary.json.
 - 2026-06-07 20:31:11 HKT：Eval job hrmmoe32-0605-e3-std is Succeeded.
 - 2026-06-07 20:31:11 HKT：Loaded summary for hrmmoe32-0605-e3-std: rjob_logs/hrmmoe32-0605-e3-std_bench/summary.json.
 - 2026-06-07 22:09:06 HKT：Eval job hrmmoe32-0605-e3-aime is Succeeded.
@@ -840,6 +837,9 @@ AIME25 Majority Voting（百分比）：
 - 2026-06-08 17:25:47 HKT：Submitted hrmmoe32-0605-e4-std for epoch 4 Standard.
 - 2026-06-08 17:25:48 HKT：Submitted hrmmoe32-0605-e4-mmlu for epoch 4 MMLU-Pro.
 - 2026-06-08 17:25:49 HKT：Submitted hrmmoe32-0605-e4-aime for epoch 4 AIME25.
+- 2026-06-08 17:31:00 HKT：Eval job hrmmoe32-0605-e4-aime is Unknown.
+- 2026-06-08 17:31:01 HKT：Eval job hrmmoe32-0605-e4-mmlu is Running.
+- 2026-06-08 17:31:02 HKT：Eval job hrmmoe32-0605-e4-std is Running.
 <!-- HRM_EVAL_MONITOR:hrm-moe32g-sm16-06050339:end -->
 
 ## UltraData SFT 接入 64x8 MoE
