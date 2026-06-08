@@ -989,3 +989,21 @@ AIME25 Majority Voting（百分比）：
   `130/212677`，暂无 `Traceback`、OOM 或 `max_steps` 字样。早期 tqdm ETA 约 70 小时
   量级；这是 batch 翻倍后将总 step 从 r3 的 `425355` 降到 `212677`，不是减少 epoch
   或截断数据。
+
+### 2026-06-09 00:56 HKT HRM-MoE Hugging Face 发布
+
+- 按用户要求将 64x8 MoE 预训练模型的 epoch4 checkpoint 发布到
+  `Xiaoye08/HRM-MoE`。参考 `sapientinc/HRM-Text-1B` 的发布形态，最终使用根目录
+  `model.safetensors`，而不是原生 FSDP2 `.distcp` 分片目录。
+- 曾短暂尝试上传原生 FSDP2 checkpoint，发现会产生很多 `native_checkpoint/` 分片文件；
+  已停止上传并从 HF repo 删除 `native_checkpoint/**`，最终远端无 `.distcp` 残留。
+- 新增导出工具 `conversion/export_dcp_to_hf_safetensors.py`，从
+  `checkpoints/hrm-moe32g-sm16-06050339/fsdp2_epoch_4` 抽取 EMA 模型权重，保存为 bf16
+  `model.safetensors`。导出 rjob `hrm-moe64-e4-hf-export-r2` 成功，输出
+  `/mnt/shared-storage-user/quxiaoye/hf_hrm_moe_export/model.safetensors`，包含 163 个
+  tensor，文件大小约 10.8GB。
+- 00:56:49 HKT，上传脚本
+  `/mnt/shared-storage-user/quxiaoye/hf_upload_logs/upload_hrm_moe_release.sh` 完成上传，
+  远端文件为 `.gitattributes`、`LICENSE`、`README.md`、`config.json`、
+  `model.safetensors`、`tokenizer.json`、`tokenizer_config.json` 共 7 个根目录文件。
+  临时 token 文件 `/tmp/hrm_moe_hf_token` 已删除。
