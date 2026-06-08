@@ -2,6 +2,7 @@ from typing import Any, Iterator, Generator, Optional
 from dataclasses import dataclass
 from glob import glob
 from pathlib import Path
+import json
 import os
 import yaml
 
@@ -111,6 +112,127 @@ def inference_load_checkpoint(ckpt_path: str, ckpt_epoch: Optional[int], ckpt_us
         carry=carry,
         tokenizer=tokenizer,
         tokenizer_info=train_metadata.tokenizer_info
+    )
+
+
+def _resolve_hf_checkpoint_dir(model_id_or_path: str, revision: Optional[str], local_files_only: bool) -> Path:
+    path = Path(model_id_or_path)
+    if path.exists():
+        return path
+
+    from huggingface_hub import snapshot_download
+
+    return Path(snapshot_download(
+        repo_id=model_id_or_path,
+        revision=revision,
+        local_files_only=local_files_only,
+        allow_patterns=[
+            "config.json",
+            "model.safetensors",
+            "tokenizer.json",
+            "tokenizer_config.json",
+            "special_tokens_map.json",
+        ],
+    ))
+
+
+def _hf_to_native_key(key: str) -> str:
+    key = key.replace("model.H_module.layers.", "model.H_level.core.layers.")
+    key = key.replace("model.L_module.layers.", "model.L_level.core.layers.")
+    key = key.replace("model.z_L_init", "model.zL_init")
+    if key == "model.embed_tokens.weight":
+        return "embed_tokens.embedding_weight"
+    return key
+
+
+def _native_config_from_hf_config(hf_config: dict[str, Any]) -> dict[str, Any]:
+    hidden_size = int(hf_config["hidden_size"])
+    initializer_range = float(hf_config.get("initializer_range", hidden_size ** -0.5))
+
+    return {
+        "vocab_size": int(hf_config["vocab_size"]),
+        "max_seq_len": int(hf_config["max_position_embeddings"]),
+        "n_layers": int(hf_config["num_hidden_layers"]),
+        "half_layers": False,
+        "hidden_size": hidden_size,
+        "num_heads": int(hf_config["num_attention_heads"]),
+        "expansion": 4.0,
+        "norm_type": "pre",
+        "norm_eps": float(hf_config.get("rms_norm_eps", 1e-6)),
+        "rope_theta": float(hf_config.get("rope_theta", 10000.0)),
+        "pos_emb_type": "rope",
+        "init_type": "lecun_normal",
+        "init_std": initializer_range,
+        "attn_type": "prefixlm",
+        "H_cycles": int(hf_config["H_cycles"]),
+        "L_cycles": int(hf_config["L_cycles"]),
+        "H_override": {},
+        "bp_warmup_ratio": 0.0,
+        "bp_min_steps": 2,
+        "bp_max_steps": 5,
+        "moe_num_experts": int(hf_config.get("moe_num_experts", 0)),
+        "moe_top_k": int(hf_config.get("moe_top_k", 1)),
+        "moe_intermediate_size": (
+            int(hf_config["moe_intermediate_size"])
+            if hf_config.get("moe_intermediate_size") is not None
+            else None
+        ),
+        "moe_norm_topk_prob": bool(hf_config.get("moe_norm_topk_prob", True)),
+        "moe_router_aux_loss_coef": float(hf_config.get("moe_router_aux_loss_coef", 0.0)),
+        "moe_implementation": hf_config.get("moe_implementation", "grouped_triton"),
+        "moe_expert_in_one_shard": int(hf_config.get("moe_expert_in_one_shard", 1)),
+    }
+
+
+def _tokenizer_info_from_hf_config(hf_config: dict[str, Any], tokenizer: PreTrainedTokenizer) -> dict[str, Any]:
+    return {
+        "boq": tokenizer.bos_token or "<|im_start|>",
+        "eoq": hf_config.get("eoq_token", "<|im_end|>"),
+        "eoa": tokenizer.eos_token or "<|box_end|>",
+        "condition_mapping": hf_config.get("condition_mapping", {
+            "direct": "<|object_ref_start|>",
+            "cot": "<|object_ref_end|>",
+            "noisy": "<|quad_start|>",
+            "synth": "<|quad_end|>",
+        }),
+    }
+
+
+def inference_load_hf_checkpoint(
+    model_id_or_path: str = "Xiaoye08/HRM-MoE",
+    *,
+    revision: Optional[str] = None,
+    local_files_only: bool = False,
+    device: str | torch.device = "cuda",
+    dtype: torch.dtype = torch.bfloat16,
+) -> InferenceCheckpoint:
+    """Load the single-file Hugging Face HRM-MoE release for native inference."""
+    from safetensors.torch import load_file
+
+    ckpt_dir = _resolve_hf_checkpoint_dir(model_id_or_path, revision, local_files_only)
+    hf_config = json.loads((ckpt_dir / "config.json").read_text())
+    tokenizer = AutoTokenizer.from_pretrained(str(ckpt_dir), use_fast=True, local_files_only=True)
+    tokenizer_info = _tokenizer_info_from_hf_config(hf_config, tokenizer)
+    native_cfg = _native_config_from_hf_config(hf_config)
+
+    model_cls = load_model_class("baselines.hrm_nocarry_bp_warmup@HierarchicalReasoningModel")
+    head_cls = load_model_class("lm_head@LMHead")
+    with torch.device("meta"):
+        model: nn.Module = model_cls(native_cfg)
+        model = head_cls(model, native_cfg)
+
+    hf_state = load_file(ckpt_dir / "model.safetensors", device="cpu")
+    native_state = {_hf_to_native_key(key): value for key, value in hf_state.items()}
+    incompatible = model.load_state_dict(native_state, strict=True, assign=True)
+    if incompatible.missing_keys or incompatible.unexpected_keys:
+        raise RuntimeError(f"Invalid HRM-MoE HF checkpoint keys: {incompatible}")
+
+    model = model.to(device=device, dtype=dtype).eval()
+    return InferenceCheckpoint(
+        model=model,
+        carry=None,
+        tokenizer=tokenizer,
+        tokenizer_info=tokenizer_info,
     )
 
 
