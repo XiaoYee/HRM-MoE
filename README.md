@@ -9,42 +9,59 @@
 
 ## Model Structure Comparison
 
-```mermaid
-flowchart LR
-  subgraph Dense["HRM-Text dense block"]
-    direction TB
-    D0["Packed PrefixLM tokens"] --> D1["HRM recurrent layers"]
-    D1 --> D2["Attention"]
-    D2 --> D3["Dense SwiGLU FFN<br/>one shared 4096-wide intermediate"]
-    D3 --> D4["LM head"]
-  end
-
-  subgraph Sparse["HRM-MoE block"]
-    direction TB
-    M0["Packed PrefixLM tokens"] --> M1["HRM recurrent layers"]
-    M1 --> M2["Attention"]
-    M2 --> M3["FP32 router<br/>64 experts, top-k 8"]
-    M3 --> M4["Grouped Triton dispatch"]
-    M4 --> M5["8 active experts x 512 width<br/>active width = 4096"]
-    M5 --> M6["Weighted combine<br/>aux load-balancing loss"]
-    M6 --> M7["LM head"]
-  end
-```
-
 HRM-MoE is a sparse Mixture-of-Experts extension of
 [sapientinc/HRM-Text](https://github.com/sapientinc/HRM-Text). It keeps the
 original HRM-Text recipe for hierarchical recurrent modeling, PrefixLM sequence
 packing, FlashAttention 3, PyTorch FSDP2 training, checkpointing, evaluation,
 and conversion, while replacing the dense FFN path with a routed MoE FFN.
 
-The current code version uses one final MoE preset:
+| Config | Layers | Hidden | Heads | FFN / experts | Active FFN width | Parameters |
+| --- | ---: | ---: | ---: | --- | ---: | ---: |
+| HRM-Text `XL` dense | 32 | 1536 | 12 | dense SwiGLU, intermediate 4096 | 4096 | ~1.18B |
+| HRM-MoE [`XL_moe64x8_grouped_triton`](config/arch/size/XL_moe64x8_grouped_triton.yaml) | 32 | 1536 | 12 | 64 routed SwiGLU experts, top-k 8, expert width 512 | `8 x 512 = 4096` | ~5.41B |
 
-| Preset | Experts | Top-k | Active expert width | Expert compute |
-| --- | ---: | ---: | ---: | --- |
-| [`XL_moe64x8_grouped_triton`](config/arch/size/XL_moe64x8_grouped_triton.yaml) | 64 | 8 | `8 x 512 = 4096` | grouped Triton GEMM |
+The 64x8 preset keeps the per-token active FFN width aligned with the dense XL
+HRM-Text FFN while giving the model a larger sparse expert pool. The final
+expert path uses fp32 router softmax, normalized top-k routing, auxiliary
+load-balancing loss, and grouped Triton GEMMs for expert compute.
 
-This keeps the active FFN width aligned with the dense XL HRM-Text FFN while
-giving the model a larger sparse expert pool.
+## 32-GPU Pretraining Results
+
+The table below compares the 32-GPU dense XL run against the 32-GPU HRM-MoE
+64x8 run on the same sampled HRM pretraining data and `global_batch_size=196608`.
+Both runs use 4 epochs. AIME for MoE epoch 4 is still running, so the latest
+available MoE AIME result is epoch 3.
+
+| Benchmark | Metric | Dense XL epoch 4 | HRM-MoE 64x8 latest |
+| --- | --- | ---: | ---: |
+| GSM8k | acc | 83.93 | 84.99 (e4) |
+| MATH | acc | 54.96 | 60.08 (e4) |
+| DROP | em | 79.45 | 80.86 (e4) |
+| DROP | f1 | 83.06 | 84.53 (e4) |
+| MMLU | acc | 61.38 | 61.18 (e4) |
+| ARC | acc | 83.02 | 87.80 (e4) |
+| HellaSwag | acc | 61.96 | 73.89 (e4) |
+| Winogrande | acc | 71.98 | 73.88 (e4) |
+| BoolQ | acc | 87.25 | 88.75 (e4) |
+| MMLU-Pro | acc | 32.72 | 37.57 (e4) |
+| AIME25 | maj_pass@1 | 13.33 | 16.67 (e3) |
+| AIME25 | maj_pass@10 | 36.67 | 33.33 (e3) |
+| AIME25 | maj_pass@100 | 53.33 | 43.33 (e3) |
+
+Same-epoch comparison at epoch 2:
+
+| Benchmark | Metric | Dense XL epoch 2 | HRM-MoE 64x8 epoch 2 |
+| --- | --- | ---: | ---: |
+| GSM8k | acc | 77.10 | 82.87 |
+| MATH | acc | 49.48 | 55.58 |
+| DROP | f1 | 76.05 | 81.95 |
+| MMLU | acc | 54.67 | 58.70 |
+| ARC | acc | 71.93 | 82.68 |
+| HellaSwag | acc | 45.73 | 63.78 |
+| Winogrande | acc | 64.80 | 69.38 |
+| BoolQ | acc | 82.66 | 86.61 |
+| MMLU-Pro | acc | 25.98 | 31.23 |
+| AIME25 | maj_pass@100 | 50.00 | 50.00 |
 
 ## Launch the MoE Pretraining
 
