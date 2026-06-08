@@ -114,7 +114,14 @@ def tokenizer_path(metadata: dict, checkpoint_root: Path, override: Path | None)
         path = override
     else:
         raw_path = Path(metadata["tokenizer_info"]["tokenizer_path"])
-        path = raw_path if raw_path.is_absolute() else checkpoint_root / raw_path
+        if raw_path.is_absolute():
+            path = raw_path
+        else:
+            candidates = [
+                checkpoint_root / raw_path,
+                Path("/mnt/shared-storage-user/quxiaoye/data_io/tokenizer") / raw_path,
+            ]
+            path = next((candidate for candidate in candidates if candidate.exists()), candidates[0])
     return path.parent if path.name == "tokenizer.json" else path
 
 
