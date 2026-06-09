@@ -236,6 +236,87 @@ def inference_load_hf_checkpoint(
     )
 
 
+class HRMMoEForCausalLM:
+    """Small generate-style wrapper around the native HRM-MoE inference engine."""
+
+    def __init__(self, ckpt: InferenceCheckpoint) -> None:
+        self.ckpt = ckpt
+        self.tokenizer = ckpt.tokenizer
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        model_id_or_path: str = "Xiaoye08/HRM-MoE",
+        *,
+        dtype: torch.dtype = torch.bfloat16,
+        torch_dtype: Optional[torch.dtype] = None,
+        device: str | torch.device = "cpu",
+        revision: Optional[str] = None,
+        local_files_only: bool = False,
+    ) -> "HRMMoEForCausalLM":
+        if torch_dtype is not None:
+            dtype = torch_dtype
+        ckpt = inference_load_hf_checkpoint(
+            model_id_or_path,
+            revision=revision,
+            local_files_only=local_files_only,
+            device=device,
+            dtype=dtype,
+        )
+        return cls(ckpt)
+
+    @property
+    def model(self) -> nn.Module:
+        return self.ckpt.model
+
+    @property
+    def device(self) -> torch.device:
+        return next(self.model.parameters()).device
+
+    def cuda(self, device: Optional[int | torch.device] = None) -> "HRMMoEForCausalLM":
+        self.ckpt.model = self.model.cuda(device)
+        return self
+
+    def to(self, *args, **kwargs) -> "HRMMoEForCausalLM":
+        self.ckpt.model = self.model.to(*args, **kwargs)
+        return self
+
+    def eval(self) -> "HRMMoEForCausalLM":
+        self.model.eval()
+        return self
+
+    @torch.inference_mode()
+    def generate(
+        self,
+        prompt: str | list[str],
+        *,
+        condition: str = "synth,cot",
+        max_new_tokens: int = 256,
+        max_length: int = 4096,
+        do_sample: bool = False,
+        temperature: float = 1.0,
+        batch_size: int = 1,
+    ) -> str | list[str]:
+        if self.device.type != "cuda":
+            raise RuntimeError("HRM-MoE native generation requires CUDA. Call .cuda() before generate().")
+
+        single = isinstance(prompt, str)
+        prompts = [prompt] if single else list(prompt)
+        temp = temperature if do_sample else 0.0
+        outputs = [""] * len(prompts)
+        iterator = ((idx, (condition, text)) for idx, text in enumerate(prompts))
+        for idx, text in inference_generate(
+            self.ckpt,
+            iterator,
+            max_tokens=max_length,
+            max_generation=max_new_tokens,
+            batch_size=batch_size,
+            temp=temp,
+        ):
+            outputs[idx] = text
+        return outputs[0] if single else outputs
+
+
 @_compile_for_eval(fullgraph=True)
 def _sample_gumbel(logits: Tensor, temp: Tensor):
     scaled_logits = logits.to(torch.float32) / temp

@@ -1026,3 +1026,19 @@ AIME25 Majority Voting（百分比）：
   仍为 `.gitattributes`、`LICENSE`、`README.md`、`config.json`、`model.safetensors`、
   `tokenizer.json`、`tokenizer_config.json` 七个根目录文件；raw URL 已确认能看到
   active params、Dense HRM-Text 对比和 `inference_load_hf_checkpoint` 推理示例。
+
+### 2026-06-09 11:10 HKT HRM-MoE HF usage 简化
+
+- 用户指出 HF `Usage` 暴露了 `inference_generate` 的内部 iterator / request id 接口，
+  不像 `sapientinc/HRM-Text-1B` 的 `from_pretrained + generate` 示例。
+- `simple_inference_engine.py` 新增 `HRMMoEForCausalLM` wrapper，保留原生
+  `inference_generate` 评测接口，同时提供
+  `HRMMoEForCausalLM.from_pretrained(...).cuda().eval()` 和
+  `model.generate(prompt, condition="synth,cot", max_new_tokens=...)` 的用户接口。
+  GitHub `XiaoYee/HRM-MoE` 的 `main` 已快进到 `815480d`。
+- HF `README.md` 的 `Usage` 已改为 wrapper 示例；仍明确说明目前不是 vanilla
+  `transformers.AutoModelForCausalLM`，因为 `hrm_text_moe` 尚未像 `hrm_text` 一样进入
+  Transformers，需要自定义 MoE routing 和 grouped Triton kernel 代码路径。
+- 11:12 HKT 已上传远端 `README.md`；raw URL 复查只看到 `HRMMoEForCausalLM` /
+  `model.generate` 新示例，未再出现旧的 `inference_generate` iterator / request id
+  usage。HF 文件列表仍保持七个根目录文件。
