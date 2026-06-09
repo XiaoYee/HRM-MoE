@@ -1,9 +1,10 @@
 ![](./assets/banner.png)
 
-# HRM-MoE: Efficient Sparse Pretraining with Hierarchical Reasoning
+<h1 align="center">HRM-MoE: Efficient Sparse Pretraining with Hierarchical Reasoning</h1>
 
 <p align="center">
   <a href="https://arxiv.org/abs/2605.20613"><img src="https://img.shields.io/badge/Base-HRM--Text-red?logo=arxiv&logoColor=white" alt="HRM-Text Paper"></a>
+  <a href="https://huggingface.co/Xiaoye08/HRM-MoE"><img src="https://img.shields.io/badge/Model-HuggingFace-yellow" alt="HRM-MoE Model"></a>
   <a href="https://github.com/XiaoYee/HRM-MoE"><img src="https://img.shields.io/badge/Code-HRM--MoE-181717?logo=github&logoColor=white" alt="HRM-MoE Code"></a>
 </p>
 
