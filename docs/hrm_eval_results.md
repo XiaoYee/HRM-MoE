@@ -1065,3 +1065,14 @@ AIME25 Majority Voting（百分比）：
 - HF model card 已经使用上述 epoch4 AIME 结果；GitHub README 仍保留 “AIME for MoE
   epoch 4 is still running” 的旧说明和 epoch3 AIME 数值。已将 README 同步为
   HRM-MoE 64x8 epoch4 结果。
+
+### 2026-06-09 12:18 HKT HRM-MoE Hugging Face 标题修订
+
+- 按用户要求，将 HF model card 的一级标题从 `HRM-MoE` 改为
+  `HRM-MoE: Efficient Sparse Pretraining with Hierarchical Reasoning`。
+- 复查 HF 远端当前发布形态：根目录包含 `model.safetensors`、`tokenizer.json`、
+  `tokenizer_config.json`、`config.json`、`configuration_hrm_text_moe.py`、
+  `modeling_hrm_text_moe.py`、`README.md`、`LICENSE`、`.gitattributes`；`config.json`
+  包含 `AutoConfig` / `AutoModelForCausalLM` 的 `auto_map`，Usage 使用
+  `trust_remote_code=True`，结果表为 epoch4 完整评测；同时修正 Prompt Format 和
+  Limitations 中不再适用于 remote-code 版本的措辞。
