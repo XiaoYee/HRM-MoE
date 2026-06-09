@@ -49,20 +49,6 @@ checkpoint evaluation.
 | AIME25 | maj_pass@10 | 36.67 | 36.67 (e4) |
 | AIME25 | maj_pass@100 | 53.33 | 56.67 (e4) |
 
-Same-epoch comparison at epoch 2:
-
-| Benchmark | Metric | Dense XL epoch 2 | HRM-MoE 64x8 epoch 2 |
-| --- | --- | ---: | ---: |
-| GSM8k | acc | 77.10 | 82.87 |
-| MATH | acc | 49.48 | 55.58 |
-| DROP | f1 | 76.05 | 81.95 |
-| MMLU | acc | 54.67 | 58.70 |
-| ARC | acc | 71.93 | 82.68 |
-| HellaSwag | acc | 45.73 | 63.78 |
-| Winogrande | acc | 64.80 | 69.38 |
-| BoolQ | acc | 82.66 | 86.61 |
-| MMLU-Pro | acc | 25.98 | 31.23 |
-| AIME25 | maj_pass@100 | 50.00 | 50.00 |
 
 ## Launch the MoE Pretraining
 
