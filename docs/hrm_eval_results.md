@@ -919,3 +919,13 @@ AIME25 Majority Voting（百分比）：
 - 后续使用新的 job/checkpoint 名，避免旧 stopped job 和 marker 干扰：
   `SFT_JOB_NAME=hrm-moe64-sft-ultra0608-e4`，
   `SFT_CHECKPOINT_PATH=/mnt/shared-storage-user/quxiaoye/HRM-Text-moe64x8/checkpoints/hrm-moe64x8-ultradata-sft-e4-0608`。
+
+### 2026-06-09 12:05 HKT HRM-MoE GitHub / HF 结果表同步
+
+- 用户发现 `Xiaoye08/HRM-MoE` 的 HF model card 和 `XiaoYee/HRM-MoE` 的 GitHub README
+  结果表不一致。复查 `hrm-moe32g-sm16-06050339` 的在线评测监控后确认，真实/latest
+  结果为 epoch4 完整评测：AIME25 `maj_pass@1=16.67`、`maj_pass@10=36.67`、
+  `maj_pass@100=56.67`。
+- HF model card 已经使用上述 epoch4 AIME 结果；GitHub README 仍保留 “AIME for MoE
+  epoch 4 is still running” 的旧说明和 epoch3 AIME 数值。已将 README 同步为
+  HRM-MoE 64x8 epoch4 结果。
