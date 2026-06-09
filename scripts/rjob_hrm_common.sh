@@ -103,6 +103,10 @@ rjob_env=(
   -e "HRM_EXPORT_CKPT_EPOCH=${HRM_EXPORT_CKPT_EPOCH:-}"
   -e "HRM_EXPORT_OUT_DIR=${HRM_EXPORT_OUT_DIR:-}"
   -e "HRM_EXPORT_EXTRA_ARGS=${HRM_EXPORT_EXTRA_ARGS:-}"
+  -e "HRM_HF_REMOTE_MODEL_ID=${hf_remote_model_id:-${HRM_HF_REMOTE_MODEL_ID:-}}"
+  -e "HRM_HF_REMOTE_EVAL_MODE=${hf_remote_eval_mode:-${HRM_HF_REMOTE_EVAL_MODE:-}}"
+  -e "HRM_HF_REMOTE_EVAL_OUTPUT_DIR=${hf_remote_eval_output_dir:-${HRM_HF_REMOTE_EVAL_OUTPUT_DIR:-}}"
+  -e "HRM_HF_REMOTE_MAX_NEW_TOKENS=${hf_remote_max_new_tokens:-${HRM_HF_REMOTE_MAX_NEW_TOKENS:-}}"
   -e "WANDB_MODE=${WANDB_MODE:-online}"
 )
 

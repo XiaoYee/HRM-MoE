@@ -1042,3 +1042,16 @@ AIME25 Majority Voting（百分比）：
 - 11:12 HKT 已上传远端 `README.md`；raw URL 复查只看到 `HRMMoEForCausalLM` /
   `model.generate` 新示例，未再出现旧的 `inference_generate` iterator / request id
   usage。HF 文件列表仍保持七个根目录文件。
+
+### 2026-06-09 11:33 HKT HRM-MoE trust_remote_code 验证准备
+
+- 按用户要求将 HF 使用方式改为 `transformers.AutoModelForCausalLM.from_pretrained(...,
+  trust_remote_code=True)`，不再要求用户从 `simple_inference_engine` import。
+- HF repo 已新增 `configuration_hrm_text_moe.py`、`modeling_hrm_text_moe.py`，并在
+  `config.json` 写入 `auto_map`。远端文件列表目前为九个根目录文件：原七个发布文件 +
+  两个 remote-code Python 文件；未重新上传 `model.safetensors`。
+- 本地 staging 已通过 `AutoConfig.from_pretrained(..., trust_remote_code=True)` 检查；
+  meta 模型 state_dict 的 163 个 key 与 HF `model.safetensors` 的 163 个 tensor 完全
+  对齐。tiny 随机模型已跑通 `AutoModelForCausalLM.generate`。
+- 后续验证按用户要求不跑子集：先跑 README Usage smoke，再跑完整 `GSM8k` test set
+  `n=1319`，与 README 中 `GSM8k acc=84.99` 对照。
