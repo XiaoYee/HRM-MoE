@@ -29,10 +29,10 @@ load-balancing loss, and grouped Triton GEMMs for expert compute.
 
 The table below compares the 32-GPU dense XL run against the 32-GPU HRM-MoE
 64x8 run on the same sampled HRM pretraining data and `global_batch_size=196608`.
-Both runs use 4 epochs. AIME for MoE epoch 4 is still running, so the latest
-available MoE AIME result is epoch 3.
+Both runs use 4 epochs, and the MoE column reports the completed epoch-4
+checkpoint evaluation.
 
-| Benchmark | Metric | Dense XL epoch 4 | HRM-MoE 64x8 latest |
+| Benchmark | Metric | Dense XL epoch 4 | HRM-MoE 64x8 epoch 4 |
 | --- | --- | ---: | ---: |
 | GSM8k | acc | 83.93 | 84.99 (e4) |
 | MATH | acc | 54.96 | 60.08 (e4) |
@@ -44,9 +44,9 @@ available MoE AIME result is epoch 3.
 | Winogrande | acc | 71.98 | 73.88 (e4) |
 | BoolQ | acc | 87.25 | 88.75 (e4) |
 | MMLU-Pro | acc | 32.72 | 37.57 (e4) |
-| AIME25 | maj_pass@1 | 13.33 | 16.67 (e3) |
-| AIME25 | maj_pass@10 | 36.67 | 33.33 (e3) |
-| AIME25 | maj_pass@100 | 53.33 | 43.33 (e3) |
+| AIME25 | maj_pass@1 | 13.33 | 16.67 (e4) |
+| AIME25 | maj_pass@10 | 36.67 | 36.67 (e4) |
+| AIME25 | maj_pass@100 | 53.33 | 56.67 (e4) |
 
 Same-epoch comparison at epoch 2:
 
