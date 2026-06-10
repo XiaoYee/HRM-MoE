@@ -16,39 +16,50 @@ original HRM-Text recipe for hierarchical recurrent modeling, PrefixLM sequence
 packing, FlashAttention 3, PyTorch FSDP2 training, checkpointing, evaluation,
 and conversion, while replacing the dense FFN path with a routed MoE FFN.
 
-| Config | Layers | Hidden | Heads | FFN / experts | Active FFN width | Parameters |
-| --- | ---: | ---: | ---: | --- | ---: | ---: |
-| HRM-Text `XL` dense | 32 | 1536 | 12 | dense SwiGLU, intermediate 4096 | 4096 | ~1.18B |
-| HRM-MoE [`XL_moe64x8_grouped_triton`](config/arch/size/XL_moe64x8_grouped_triton.yaml) | 32 | 1536 | 12 | 64 routed SwiGLU experts, top-k 8, expert width 512 | `8 x 512 = 4096` | ~5.41B |
+| Config | Layers | Hidden | Heads | FFN / experts | Active FFN width per token | Total parameters | Status |
+| --- | ---: | ---: | ---: | --- | ---: | ---: | --- |
+| HRM-Text `XL` dense | 32 | 1536 | 12 | dense SwiGLU, intermediate 4096 | 4096 | ~1.18B | dense baseline |
+| HRM-MoE [`XL_moe64x8_grouped_triton`](config/arch/size/XL_moe64x8_grouped_triton.yaml) | 32 | 1536 | 12 | 64 routed SwiGLU experts, top-k 8, expert width 512 | `8 x 512 = 4096` | ~5.41B | released checkpoint |
+| HRM-MoE `XL_moe128x8` | 32 | 1536 | 12 | 128 routed SwiGLU experts, top-k 8, expert width 512 | `8 x 512 = 4096` | ~10.25B | experimental comparison |
 
-The 64x8 preset keeps the per-token active FFN width aligned with the dense XL
-HRM-Text FFN while giving the model a larger sparse expert pool. The final
-expert path uses fp32 router softmax, normalized top-k routing, auxiliary
-load-balancing loss, and grouped Triton GEMMs for expert compute.
+Both MoE variants keep the per-token activated FFN width aligned with the dense
+XL HRM-Text FFN: only 8 experts are active for each token, so the activated FFN
+width remains 4096. The 128x8 run doubles the inactive expert pool compared
+with 64x8 while keeping the same per-token activation. In our completed
+pretraining comparison, that extra sparse capacity did not consistently improve
+quality over 64x8; the Hugging Face release therefore uses the 64x8 checkpoint.
+
+The released 64x8 path uses fp32 router softmax, normalized top-k routing,
+auxiliary load-balancing loss, and grouped Triton GEMMs for expert compute.
 
 ## 32-GPU Pretraining Results
 
-The table below compares the 32-GPU dense XL run against the 32-GPU HRM-MoE
-64x8 run on the same sampled HRM pretraining data and `global_batch_size=196608`.
-Both runs use 4 epochs, and the MoE column reports the completed epoch-4
-checkpoint evaluation.
+The table below compares the 32-GPU dense XL run, the released 64x8 HRM-MoE
+run, and the completed 128x8 same-activation experiment on the same sampled HRM
+pretraining data and `global_batch_size=196608`. All three columns report
+completed epoch-4 checkpoint evaluation.
 
-| Benchmark | Metric | Dense XL epoch 4 | HRM-MoE 64x8 epoch 4 |
-| --- | --- | ---: | ---: |
-| GSM8k | acc | 83.93 | 84.99 (e4) |
-| MATH | acc | 54.96 | 60.08 (e4) |
-| DROP | em | 79.45 | 80.86 (e4) |
-| DROP | f1 | 83.06 | 84.53 (e4) |
-| MMLU | acc | 61.38 | 61.18 (e4) |
-| ARC | acc | 83.02 | 87.80 (e4) |
-| HellaSwag | acc | 61.96 | 73.89 (e4) |
-| Winogrande | acc | 71.98 | 73.88 (e4) |
-| BoolQ | acc | 87.25 | 88.75 (e4) |
-| MMLU-Pro | acc | 32.72 | 37.57 (e4) |
-| AIME25 | maj_pass@1 | 13.33 | 16.67 (e4) |
-| AIME25 | maj_pass@10 | 36.67 | 36.67 (e4) |
-| AIME25 | maj_pass@100 | 53.33 | 56.67 (e4) |
+| Benchmark | Metric | Dense XL epoch 4 | HRM-MoE 64x8 epoch 4 | HRM-MoE 128x8 epoch 4 |
+| --- | --- | ---: | ---: | ---: |
+| GSM8k | acc | 83.93 | 84.99 | 86.20 |
+| MATH | acc | 54.96 | 60.08 | 59.56 |
+| DROP | em | 79.45 | 80.86 | 80.25 |
+| DROP | f1 | 83.06 | 84.53 | 83.86 |
+| MMLU | acc | 61.38 | 61.18 | 62.80 |
+| ARC | acc | 83.02 | 87.80 | 86.95 |
+| HellaSwag | acc | 61.96 | 73.89 | 70.93 |
+| Winogrande | acc | 71.98 | 73.88 | 73.95 |
+| BoolQ | acc | 87.25 | 88.75 | 88.44 |
+| MMLU-Pro | acc | 32.72 | 37.57 | 34.44 |
+| AIME25 | maj_pass@1 | 13.33 | 16.67 | 20.00 |
+| AIME25 | maj_pass@10 | 36.67 | 36.67 | 40.00 |
+| AIME25 | maj_pass@100 | 53.33 | 56.67 | 46.67 |
 
+64x8 is the stronger default at epoch 4: it wins on MATH, DROP, ARC,
+HellaSwag, BoolQ, MMLU-Pro, and AIME25 `maj_pass@100`. The 128x8 experiment
+improves GSM8k, MMLU, Winogrande, and AIME25 `maj_pass@1/10`, but it also shows
+a much higher MMLU-Pro invalid rate (`9.94%` vs `1.57%` for 64x8), so we do not
+treat it as the primary release model.
 
 ## Launch the MoE Pretraining
 
