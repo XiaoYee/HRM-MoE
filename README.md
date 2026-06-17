@@ -388,6 +388,19 @@ If you use the original HRM-Text work, please cite:
 }
 ```
 
+If you use this HRM-MoE repository, checkpoints, or evaluation results, please
+also cite:
+
+```bibtex
+@misc{xiao2026hrmmoe,
+      title={HRM-MoE: Efficient Sparse Pretraining with Hierarchical Reasoning},
+      author={XiaoYee},
+      year={2026},
+      howpublished={\url{https://github.com/XiaoYee/HRM-MoE}},
+      note={GitHub repository and model checkpoints},
+}
+```
+
 ## License
 
 Apache License 2.0
