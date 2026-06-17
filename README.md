@@ -394,7 +394,7 @@ also cite:
 ```bibtex
 @misc{xiao2026hrmmoe,
       title={HRM-MoE: Efficient Sparse Pretraining with Hierarchical Reasoning},
-      author={XiaoYee},
+      author={Xiaoye Qu},
       year={2026},
       howpublished={\url{https://github.com/XiaoYee/HRM-MoE}},
       note={GitHub repository and model checkpoints},
