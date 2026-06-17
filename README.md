@@ -4,7 +4,8 @@
 
 <p align="center">
   <a href="https://arxiv.org/abs/2605.20613"><img src="https://img.shields.io/badge/Base-HRM--Text-red?logo=arxiv&logoColor=white" alt="HRM-Text Paper"></a>
-  <a href="https://huggingface.co/Xiaoye08/HRM-MoE"><img src="https://img.shields.io/badge/Model-HuggingFace-yellow" alt="HRM-MoE Model"></a>
+  <a href="https://huggingface.co/Xiaoye08/HRM-MoE"><img src="https://img.shields.io/badge/Model-XL%2064x8-yellow" alt="HRM-MoE XL Model"></a>
+  <a href="https://huggingface.co/Xiaoye08/HRM-MoE-0.6B"><img src="https://img.shields.io/badge/Model-L%2064x8-yellow" alt="HRM-MoE L Model"></a>
   <a href="https://github.com/XiaoYee/HRM-MoE"><img src="https://img.shields.io/badge/Code-HRM--MoE-181717?logo=github&logoColor=white" alt="HRM-MoE Code"></a>
 </p>
 
@@ -15,6 +16,16 @@ HRM-MoE is a sparse Mixture-of-Experts extension of
 original HRM-Text recipe for hierarchical recurrent modeling, PrefixLM sequence
 packing, FlashAttention 3, PyTorch FSDP2 training, checkpointing, evaluation,
 and conversion, while replacing the dense FFN path with a routed MoE FFN.
+
+This repository provides two active-matched 64x8 MoE releases:
+
+- [Xiaoye08/HRM-MoE](https://huggingface.co/Xiaoye08/HRM-MoE): XL-scale
+  HRM-MoE with the same activated FFN width as dense HRM-Text XL.
+- [Xiaoye08/HRM-MoE-0.6B](https://huggingface.co/Xiaoye08/HRM-MoE-0.6B):
+  L-scale HRM-MoE with about 0.70B activated parameters per token and 3.01B
+  total parameters.
+
+### XL Scale
 
 | Config | Layers | Hidden | Heads | FFN / experts | Active FFN width per token | Total parameters | Status |
 | --- | ---: | ---: | ---: | --- | ---: | ---: | --- |
@@ -29,10 +40,24 @@ with 64x8 while keeping the same per-token activation. In our completed
 pretraining comparison, that extra sparse capacity did not consistently improve
 quality over 64x8; the Hugging Face release therefore uses the 64x8 checkpoint.
 
-The released 64x8 path uses fp32 router softmax, normalized top-k routing,
+### L Scale
+
+| Config | Layers | Hidden | Heads | FFN / experts | Active FFN width per token | Total parameters | Release |
+| --- | ---: | ---: | ---: | --- | ---: | ---: | --- |
+| HRM-Text `L` dense | 24 | 1280 | 10 | dense SwiGLU, intermediate 3584 | 3584 | ~0.70B | dense baseline |
+| HRM-MoE [`L_moe64x8_grouped_triton`](config/arch/size/L_moe64x8_grouped_triton.yaml) | 24 | 1280 | 10 | 64 routed SwiGLU experts, top-k 8, expert width 448 | `8 x 448 = 3584` | 3.01B total, ~0.70B active | [HRM-MoE-0.6B](https://huggingface.co/Xiaoye08/HRM-MoE-0.6B) |
+
+The L-scale MoE release follows the same active-matching principle as the XL
+model: each token activates 8 experts, and those experts add up to the dense L
+FFN width. This makes the L release useful when you want a smaller activated
+model while keeping a larger sparse expert pool.
+
+Both released 64x8 paths use fp32 router softmax, normalized top-k routing,
 auxiliary load-balancing loss, and grouped Triton GEMMs for expert compute.
 
 ## 32-GPU Pretraining Results
+
+### XL Scale Results
 
 The table below compares the 32-GPU dense XL run, the released 64x8 HRM-MoE
 run, and the completed 128x8 same-activation experiment on the same sampled HRM
@@ -61,18 +86,45 @@ improves GSM8k, MMLU, Winogrande, and AIME25 `maj_pass@1/10`, but it also shows
 a much higher MMLU-Pro invalid rate (`9.94%` vs `1.57%` for 64x8), so we do not
 treat it as the primary release model.
 
+### L Scale Results
+
+The table below compares dense HRM-Text L and HRM-MoE L 64x8 on the same
+sampled HRM pretraining data. Both runs use 32 GPUs, 4 epochs, and
+`global_batch_size=172032`.
+
+| Benchmark | Metric | Dense L epoch 4 | HRM-MoE L 64x8 epoch 4 |
+| --- | --- | ---: | ---: |
+| GSM8k | acc | 79.61 | 83.62 |
+| MATH | acc | 50.96 | 55.50 |
+| DROP | em | 74.21 | 77.86 |
+| DROP | f1 | 77.94 | 81.47 |
+| MMLU | acc | 53.74 | 58.60 |
+| ARC | acc | 76.37 | 82.27 |
+| HellaSwag | acc | 51.48 | 65.58 |
+| Winogrande | acc | 66.93 | 70.32 |
+| BoolQ | acc | 84.56 | 86.02 |
+| MMLU-Pro | acc | 28.24 | 30.70 |
+| AIME25 | maj_pass@1 | 16.67 | 16.67 |
+| AIME25 | maj_pass@10 | 26.67 | 26.67 |
+| AIME25 | maj_pass@100 | 50.00 | 50.00 |
+
+The L-scale MoE improves all reported Standard and MMLU-Pro metrics over dense
+L at epoch 4, while AIME25 majority voting remains tied. This gives a smaller
+activated-parameter release alongside the XL checkpoint.
+
 ## Launch the MoE Pretraining
 
 ### Required Resources
 
 The intended training target is Hopper-class GPUs because the attention path
-depends on FlashAttention 3 and the final MoE expert path uses Triton kernels.
+depends on FlashAttention 3 and the MoE expert path uses Triton kernels.
 
-The final MoE preset is designed for multi-GPU pretraining:
+The released MoE presets are designed for multi-GPU pretraining:
 
 | Model | Preset | GPUs | Notes |
 | --- | --- | ---: | --- |
 | HRM-MoE XL 64x8 | `XL_moe64x8_grouped_triton` | 8+ H100/H200 | use shared storage for data and checkpoints |
+| HRM-MoE L 64x8 | `L_moe64x8_grouped_triton` | 8+ H100/H200 | active FFN width matches dense HRM-Text L |
 
 ### 1. Prepare Data
 
@@ -134,6 +186,19 @@ torchrun --nproc_per_node=8 pretrain.py \
   global_batch_size=196608
 ```
 
+For the L-scale release configuration, use:
+
+```bash
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+HRM_MOE_TRITON_AUTOTUNE=1 \
+HRM_MOE_TRITON_SM_MARGIN=16 \
+torchrun --nproc_per_node=8 pretrain.py \
+  arch/size@arch=L_moe64x8_grouped_triton \
+  data.path=/path/to/sampled \
+  global_batch_size=172032 \
+  lr=2.5e-4
+```
+
 Multi-node example:
 
 ```bash
@@ -147,9 +212,12 @@ torchrun \
   --master_addr=<MASTER_ADDR> \
   --master_port=<MASTER_PORT> \
   pretrain.py \
-  arch/size@arch=XL_moe64x8_grouped_triton \
+  arch/size@arch=<MODEL_PRESET> \
   data.path=/path/to/sampled
 ```
+
+Use `MODEL_PRESET=XL_moe64x8_grouped_triton` for the XL release or
+`MODEL_PRESET=L_moe64x8_grouped_triton` for the L release.
 
 Useful MoE training switches:
 
@@ -160,11 +228,22 @@ Useful MoE training switches:
 - `HRM_MOE_PROFILE=1` prints MoE phase timings for router, dispatch, grouped
   GEMMs, activation, combine, and auxiliary metrics.
 
-On the rjob cluster, the same final preset can be launched through the wrapper:
+On the rjob cluster, the released presets can be launched through the wrapper:
 
 ```bash
 num_gpus=8 \
 arch_size=XL_moe64x8_grouped_triton \
+data_path=/path/to/sampled \
+bash scripts/rjob_hrm_pretrain.sh
+```
+
+For the L-scale preset:
+
+```bash
+num_gpus=8 \
+arch_size=L_moe64x8_grouped_triton \
+global_batch_size=172032 \
+extra_args='lr=2.5e-4' \
 data_path=/path/to/sampled \
 bash scripts/rjob_hrm_pretrain.sh
 ```
@@ -236,9 +315,10 @@ torchrun --nproc_per_node=8 pretrain.py \
 
 `--epochs` for data preparation must match the SFT training config. Add
 `weights_only_resume_from_ema=true` when fine-tuning from pretrain EMA weights
-with a fresh optimizer.
+with a fresh optimizer. For L-scale SFT, replace the architecture preset with
+`L_moe64x8_grouped_triton`.
 
-## Verify the Final MoE Path
+## Verify the MoE Path
 
 Run a local equivalence smoke test:
 
@@ -257,10 +337,11 @@ bash scripts/rjob_hrm_moe_equiv.sh
 ```text
 HRM-MoE/
 |-- config/                       # Hydra configs for model, data, and training
+|-- config/arch/size/L_moe64x8_grouped_triton.yaml
 |-- config/arch/size/XL_moe64x8_grouped_triton.yaml
 |-- conversion/convert_to_hf.py    # FSDP2 checkpoint -> HF-style export
 |-- evaluation/                    # Evaluation engines, benchmark wrappers, configs
-|-- models/layers.py               # Attention, dense FFN, and final sparse MoE layer
+|-- models/layers.py               # Attention, dense FFN, and sparse MoE layer
 |-- models/moe_triton_grouped_gemm.py
 |-- models/moe_profile.py
 |-- docker/                        # Tested CUDA/PyTorch/FlashAttention environment
@@ -273,11 +354,11 @@ HRM-MoE/
 
 ## Technical Notes
 
-- [`models/layers.py`](models/layers.py) contains the final sparse MoE FFN path:
+- [`models/layers.py`](models/layers.py) contains the sparse MoE FFN path:
   fp32 router softmax, top-k 8 routing, grouped Triton expert compute, weighted
   combine, and auxiliary load-balancing loss.
 - [`models/moe_triton_grouped_gemm.py`](models/moe_triton_grouped_gemm.py)
-  implements the grouped Triton expert GEMM path used by the final preset.
+  implements the grouped Triton expert GEMM path used by the released presets.
 - [`models/moe_profile.py`](models/moe_profile.py) records optional CUDA event
   timings when `HRM_MOE_PROFILE=1`.
 - [`dataset_new.py`](dataset_new.py) loads PrefixLM packed samples and emits
